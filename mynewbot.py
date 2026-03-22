@@ -22,7 +22,7 @@ def run_flask():
 # ===== CONFIG =====
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 ADMIN_ID = 6257157305
-TOKEN = "BU_YERGA_O_Z_TOKENINGIZNI_QO_YING"
+TOKEN = "8670442749:AAGXklhw9ZVW5DrPt-eJtSFEOMVyUZhdPDY"
 
 # ===== DATA STORAGE =====
 correct_answers = {}
