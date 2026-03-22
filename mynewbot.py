@@ -28,7 +28,7 @@ def keep_alive():
 # ===== CONFIG =====
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 ADMIN_ID = 6257157305
-TOKEN = "8670442749:AAGNOJpvObU5RhFHd2LEfeCNaVgpiqyRGxE"
+TOKEN = "8670442749:AAE1zOey6D2Pf2WwrXOI2-sWxushdR0-CrY"
 
 # ===== DATA =====
 correct_answers = {}
