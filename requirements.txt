@@ -1,4 +1,4 @@
 python-telegram-bot==20.8
 flask==3.0.2
-matplotlib
-gunicorn
+werkzeug==3.0.1
+gunicorn==21.2.0
