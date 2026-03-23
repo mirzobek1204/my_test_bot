@@ -9,54 +9,63 @@ from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 # ===== RENDER UCHUN WEB SERVER =====
-flask_app = Flask('')
+# Bu qism Render botingizni o'chib qolmasligi uchun kerak
+flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
     return "Bot is running!"
 
 def run_flask():
+    # Render aynan 10000-portni eshitib turadi
     flask_app.run(host='0.0.0.0', port=10000)
 
-# ===== CONFIG =====
+# ===== LOGGING VA KONFIGURATSIYA =====
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 ADMIN_ID = 6257157305
 TOKEN = os.getenv("BOT_TOKEN")
 
-# ===== DATA STORAGE =====
+# ===== MA'LUMOTLAR OMBORI (Xotira) =====
 correct_answers = {}
 pdf_files = {}
 test_category = {}
 user_results = {}
-all_users = set()  # Barcha foydalanuvchilar IDlari
-user_answers_storage = {} 
+all_users = set()
+user_answers_storage = {}
 admin_state = {}
 
-# ===== SAVE / LOAD =====
+# ===== MA'LUMOTLARNI SAQLASH VA YUKLASH =====
 def save_data():
-    with open("data.json", "w") as f:
-        json.dump({
+    try:
+        data = {
             "answers": correct_answers,
             "pdfs": pdf_files,
             "categories": test_category,
             "user_results": user_results,
             "all_users": list(all_users),
             "user_answers_storage": user_answers_storage
-        }, f)
+        }
+        with open("data.json", "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        logging.error(f"Saqlashda xato: {e}")
 
 def load_data():
     global correct_answers, pdf_files, test_category, user_results, all_users, user_answers_storage
     if os.path.exists("data.json"):
-        with open("data.json", "r") as f:
-            data = json.load(f)
-            correct_answers = data.get("answers", {})
-            pdf_files = data.get("pdfs", {})
-            test_category = data.get("categories", {})
-            user_results = data.get("user_results", {})
-            all_users = set(data.get("all_users", []))
-            user_answers_storage = data.get("user_answers_storage", {})
+        try:
+            with open("data.json", "r") as f:
+                data = json.load(f)
+                correct_answers = data.get("answers", {})
+                pdf_files = data.get("pdfs", {})
+                test_category = data.get("categories", {})
+                user_results = data.get("user_results", {})
+                all_users = set(data.get("all_users", []))
+                user_answers_storage = data.get("user_answers_storage", {})
+        except Exception as e:
+            logging.error(f"Yuklashda xato: {e}")
 
-# ===== KEYBOARDS =====
+# ===== KLAVIATURALAR =====
 def get_main_keyboard(user_id):
     buttons = [
         [KeyboardButton("🏅 MILLIY SERTIFIKAT (Matematika)"), KeyboardButton("🏅 MILLIY SERTIFIKAT (Fizika)")],
@@ -66,13 +75,13 @@ def get_main_keyboard(user_id):
     ]
     if user_id == ADMIN_ID:
         buttons.append([KeyboardButton("➕ TEST QO‘SHISH"), KeyboardButton("🔑 KALIT YUKLASH")])
-        buttons.append([KeyboardButton("👤 FOYDALANUVCHILAR")]) # Tugma qo'shildi
+        buttons.append([KeyboardButton("👤 FOYDALANUVCHILAR")])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def start_test_menu():
-    return ReplyKeyboardMarkup([[KeyboardButton("🚀 Testni boshlash")],[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True)
+    return ReplyKeyboardMarkup([[KeyboardButton("🚀 Testni boshlash")], [KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True)
 
-# ===== START =====
+# ===== COMMAND HANDLERLAR =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in all_users:
@@ -81,25 +90,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("👋 Assalomu alaykum! Bo'limni tanlang 👇", reply_markup=get_main_keyboard(user_id))
 
-# ===== HANDLE MESSAGE =====
+# ===== XABARLARNI QAYTA ISHLASH (Asosiy mantiq) =====
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
     user_data = context.user_data
 
-    # --- FOYDALANUVCHILARNI KO'RISH (ADMIN UCHUN) ---
+    # --- ADMIN: FOYDALANUVCHILARNI KO'RISH ---
     if text == "👤 FOYDALANUVCHILAR" and user_id == ADMIN_ID:
         count = len(all_users)
-        msg = f"👤 **Jami foydalanuvchilar:** {count} ta\n\n"
-        if count > 0:
-            msg += "ID raqamlar:\n" + "\n".join([f"• `{uid}`" for uid in list(all_users)[:50]]) # Dastlabki 50 tasini ko'rsatish
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        msg = f"👤 Jami foydalanuvchilar: {count} ta\n"
+        await update.message.reply_text(msg)
         return
 
     # --- NATIJA CHIQARISH ---
     if text == "📊 NATIJA CHIQARISH":
         user_data['state'] = 'checking_result'
-        await update.message.reply_text("🔍 Natijani bilish uchun **Test ID** raqamini yuboring:", parse_mode="Markdown")
+        await update.message.reply_text("🔍 Natijani bilish uchun Test ID raqamini yuboring:")
         return
 
     if user_data.get('state') == 'checking_result':
@@ -111,15 +118,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             correct_key = correct_answers.get(test_id)
             u_ans = user_answers_storage[uid][test_id]
             if not correct_key:
-                await update.message.reply_text("❗ Bu test uchun kalit yuklanmagan.")
+                await update.message.reply_text("❗ Bu test uchun kalit hali yuklanmagan.")
             else:
                 correct_count = sum(1 for u, c in zip(u_ans, correct_key) if u == c)
                 percent = (correct_count * 100) // len(correct_key)
-                await update.message.reply_text(f"🎯 **Natijangiz:**\n\n🆔 Test ID: `{test_id}`\n✅ To'g'ri: {correct_count}/{len(correct_key)}\n📈 Foiz: {percent}%", parse_mode="Markdown")
+                await update.message.reply_text(f"🎯 Natijangiz:\n🆔 Test ID: {test_id}\n✅ To'g'ri: {correct_count}/{len(correct_key)}\n📈 Foiz: {percent}%")
         user_data.clear()
         return
 
-    # --- ADMIN FUNKSIYALARI ---
+    # --- ADMIN: TEST VA KALIT QO'SHISH ---
     if user_id == ADMIN_ID and user_id in admin_state:
         state = admin_state[user_id]
         if state == "choose_category":
@@ -132,7 +139,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state == "pdf_id":
             user_data["pdf_test_id"] = text
             admin_state[user_id] = "pdf_file"
-            await update.message.reply_text("📄 PDF faylni yuboring:")
+            await update.message.reply_text("📄 Endi PDF faylni yuboring:")
             return
         elif state == "key_id":
             user_data["key_test_id"] = text
@@ -148,24 +155,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del admin_state[user_id]
             return
 
-    # --- MENU NAVIGATION ---
+    # --- NAVIGATSIYA ---
     if text == "🔙 ASOSIY MENYU":
         user_data.clear()
         await update.message.reply_text("🏠 Asosiy menu:", reply_markup=get_main_keyboard(user_id))
-        return
     elif text == "➕ TEST QO‘SHISH" and user_id == ADMIN_ID:
         admin_state[user_id] = "choose_category"
         await update.message.reply_text("Bo'limni tanlang:\n1.Mat Milliy\n2.Fiz Milliy\n3.Mat DTM\n4.Fiz DTM")
-        return
     elif text == "🔑 KALIT YUKLASH" and user_id == ADMIN_ID:
         admin_state[user_id] = "key_id"
         await update.message.reply_text("Test ID raqamini kiriting:")
-        return
     elif text == "👨‍💻 Adminga bog'lanish":
-        await update.message.reply_text("Savollar bo'yicha: @miracle_0023") #
-        return
+        await update.message.reply_text("Savollar bo'yicha: @miracle_0023")
 
-    # --- TESTLARNI TANLASH ---
+    # --- TESTLARNI TANLASH VA BOSHLASH ---
     if "MILLIY" in text or "DTM" in text:
         sel_cat = ""
         if "Matematika" in text and "MILLIY" in text: sel_cat="MAT_MILLIY"
@@ -180,48 +183,61 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data['selected_test_id'] = available[0]
         user_data['state'] = 'waiting_test'
         await update.message.reply_text(f"💎 Test topildi: {available[0]}\nBoshlaymizmi?", reply_markup=start_test_menu())
-        return
 
-    if text == "🚀 Testni boshlash" and user_data.get('state') == 'waiting_test':
+    elif text == "🚀 Testni boshlash" and user_data.get('state') == 'waiting_test':
         tid = user_data.get('selected_test_id')
         path = pdf_files.get(tid)
         if tid and path and os.path.exists(path):
             await update.message.reply_document(document=open(path, 'rb'), caption=f"📝 Test ID: {tid}\nJavoblarni yuboring.", reply_markup=start_test_menu())
             user_data['state'] = 'solving'
-        return
+        else:
+            await update.message.reply_text("❌ Xato: PDF fayl topilmadi.")
 
-    if user_data.get('state') == 'solving':
+    elif user_data.get('state') == 'solving':
         tid = user_data.get('selected_test_id')
         ans = re.sub(r'[^a-zA-Z]', '', text).lower()
         uid = str(user_id)
         if uid not in user_answers_storage: user_answers_storage[uid] = {}
         user_answers_storage[uid][tid] = ans
         save_data()
-        await update.message.reply_text(f"✅ Qabul qilindi! Natijani bilish uchun ID: `{tid}` ni NATIJA bo'limiga yuboring.", reply_markup=get_main_keyboard(user_id))
+        await update.message.reply_text(f"✅ Qabul qilindi! Natijani bilish uchun NATIJA bo'limiga kiring.", reply_markup=get_main_keyboard(user_id))
         user_data.clear()
 
+# ===== HUJJATLARNI QAYTA ISHLASH (Admin uchun) =====
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id == ADMIN_ID and admin_state.get(user_id) == "pdf_file":
-        doc, tid, cat = update.message.document, context.user_data["pdf_test_id"], context.user_data["category"]
+        doc = update.message.document
+        tid = context.user_data["pdf_test_id"]
+        cat = context.user_data["category"]
         fname = f"{tid}.pdf"
         file = await context.bot.get_file(doc.file_id)
         await file.download_to_drive(fname)
-        pdf_files[tid], test_category[tid] = fname, cat
+        pdf_files[tid] = fname
+        test_category[tid] = cat
         save_data()
         await update.message.reply_text(f"✅ PDF saqlandi! ID: {tid}")
         del admin_state[user_id]
 
-# ===== RUN =====
+# ===== ASOSIY ISHGA TUSHIRISH QISMI =====
 if __name__ == "__main__":
     load_data()
+    
+    # 1. Render uyg'oq turishi uchun Flask serverni alohida oqimda yoqamiz
     threading.Thread(target=run_flask, daemon=True).start()
     
     if not TOKEN:
-        print("❌ XATO: BOT_TOKEN topilmadi!")
+        logging.error("❌ XATO: BOT_TOKEN topilmadi! Render Settings'dan tekshiring.")
     else:
+        # 2. Telegram ilovasini qurish
         app = ApplicationBuilder().token(TOKEN).build()
+        
+        # 3. Handlerlarni qo'shish
         app.add_handler(CommandHandler("start", start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_handler(MessageHandler(filters.Document.PDF, handle_document))
+        
+        logging.info("Bot ishga tushdi...")
+        
+        # 4. Botni ishga tushirish (Polling)
         app.run_polling()
