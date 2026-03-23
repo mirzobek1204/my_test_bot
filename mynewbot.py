@@ -8,8 +8,8 @@ from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# ===== RENDER UCHUN WEB SERVER =====
-# Bu qism Render botingizni o'chirib qo'ymasligi uchun kerak
+# ===== RENDER UCHUN WEB SERVER (Health Check) =====
+# Bu qism Render botingizni "Timed Out" xatosi bilan o'chirib qo'ymasligi uchun kerak
 flask_app = Flask('')
 
 @flask_app.route('/')
@@ -17,12 +17,15 @@ def home():
     return "Bot is running!"
 
 def run_flask():
+    # Render portni 10000 deb belgilaydi
     flask_app.run(host='0.0.0.0', port=10000)
 
 # ===== CONFIG =====
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 ADMIN_ID = 6257157305
-TOKEN = "8670442749:AAGXklhw9ZVW5DrPt-eJtSFEOMVyUZhdPDY"
+
+# Xavfsizlik uchun Tokenni Render Settings -> Environment Variables bo'limidan olamiz
+TOKEN = os.getenv("BOT_TOKEN")
 
 # ===== DATA STORAGE =====
 correct_answers = {}
@@ -30,7 +33,7 @@ pdf_files = {}
 test_category = {}
 user_results = {}
 all_users = set()
-user_answers_storage = {}
+user_answers_storage = {} 
 admin_state = {}
 
 # ===== SAVE / LOAD =====
@@ -67,21 +70,19 @@ def get_main_keyboard(user_id):
     ]
     if user_id == ADMIN_ID:
         buttons.append([KeyboardButton("➕ TEST QO‘SHISH"), KeyboardButton("🔑 KALIT YUKLASH")])
-        buttons.append([KeyboardButton("👤 FOYDALANUVCHILAR")])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def start_test_menu():
-    return ReplyKeyboardMarkup([[KeyboardButton("🚀 Testni boshlash")],[KeyboardButton("❌ Testni to'xtatish")],[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True)
+    return ReplyKeyboardMarkup([[KeyboardButton("🚀 Testni boshlash")],[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True)
 
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    name = update.effective_user.first_name
     if user_id not in all_users:
         all_users.add(user_id)
         save_data()
     context.user_data.clear()
-    await update.message.reply_text(f"👋 Assalomu alaykum, {name}!\n\nBilimingizni sinashga tayyormisiz? Bo‘limni tanlang 👇", reply_markup=get_main_keyboard(user_id))
+    await update.message.reply_text("👋 Assalomu alaykum! Bo'limni tanlang 👇", reply_markup=get_main_keyboard(user_id))
 
 # ===== HANDLE MESSAGE =====
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -89,6 +90,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data = context.user_data
 
+    # --- NATIJA CHIQARISH ---
     if text == "📊 NATIJA CHIQARISH":
         user_data['state'] = 'checking_result'
         await update.message.reply_text("🔍 Natijani bilish uchun **Test ID** raqamini yuboring:", parse_mode="Markdown")
@@ -111,10 +113,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data.clear()
         return
 
-    if text == "👤 FOYDALANUVCHILAR" and user_id == ADMIN_ID:
-        await update.message.reply_text(f"👤 Jami foydalanuvchilar: {len(all_users)} ta")
-        return
-
+    # --- ADMIN ---
     if user_id == ADMIN_ID and user_id in admin_state:
         state = admin_state[user_id]
         if state == "choose_category":
@@ -132,7 +131,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif state == "key_id":
             user_data["key_test_id"] = text
             admin_state[user_id] = "key_answers"
-            await update.message.reply_text("✍️ Kalitlarni yuboring (abcd...):")
+            await update.message.reply_text("✍️ Kalitlarni yuboring (masalan: abcd...):")
             return
         elif state == "key_answers":
             tid = user_data["key_test_id"]
@@ -143,6 +142,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del admin_state[user_id]
             return
 
+    # --- MENU ---
     if text == "🔙 ASOSIY MENYU":
         user_data.clear()
         await update.message.reply_text("🏠 Asosiy menu:", reply_markup=get_main_keyboard(user_id))
@@ -153,12 +153,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     elif text == "🔑 KALIT YUKLASH" and user_id == ADMIN_ID:
         admin_state[user_id] = "key_id"
-        await update.message.reply_text("ID raqamni kiriting:")
-        return
-    elif text == "👨‍💻 Adminga bog'lanish":
-        await update.message.reply_text("Savollar bo'yicha: @miracle_0023") #
+        await update.message.reply_text("ID raqamni yozing:")
         return
 
+    # --- TESTLAR ---
     if "MILLIY" in text or "DTM" in text:
         sel_cat = ""
         if "Matematika" in text and "MILLIY" in text: sel_cat="MAT_MILLIY"
@@ -188,7 +186,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if uid not in user_answers_storage: user_answers_storage[uid] = {}
         user_answers_storage[uid][tid] = ans
         save_data()
-        await update.message.reply_text(f"✅ Qabul qilindi! Natijani bilish uchun ID: `{tid}` ni NATIJA bo'limiga yuboring.", reply_markup=get_main_keyboard(user_id))
+        await update.message.reply_text(f"✅ Qabul qilindi! Natijani bilish uchun NATIJA bo'limiga `{tid}` ID-ni yuboring.", reply_markup=get_main_keyboard(user_id))
         user_data.clear()
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -206,11 +204,14 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== RUN =====
 if __name__ == "__main__":
     load_data()
-    # Flaskni alohida oqimda boshlaymiz
+    # Flaskni alohida thread'da boshlaymiz
     threading.Thread(target=run_flask, daemon=True).start()
     
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.Document.PDF, handle_document))
-    app.run_polling()
+    if not TOKEN:
+        print("❌ XATO: BOT_TOKEN topilmadi! Render Settings'ga kiring.")
+    else:
+        app = ApplicationBuilder().token(TOKEN).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        app.add_handler(MessageHandler(filters.Document.PDF, handle_document))
+        app.run_polling()
