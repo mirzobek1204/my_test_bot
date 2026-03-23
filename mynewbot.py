@@ -8,8 +8,7 @@ from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# ===== RENDER UCHUN WEB SERVER (Health Check) =====
-# Bu qism Render botingizni "Timed Out" xatosi bilan o'chirib qo'ymasligi uchun kerak
+# ===== RENDER UCHUN WEB SERVER =====
 flask_app = Flask('')
 
 @flask_app.route('/')
@@ -17,14 +16,11 @@ def home():
     return "Bot is running!"
 
 def run_flask():
-    # Render portni 10000 deb belgilaydi
     flask_app.run(host='0.0.0.0', port=10000)
 
 # ===== CONFIG =====
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 ADMIN_ID = 6257157305
-
-# Xavfsizlik uchun Tokenni Render Settings -> Environment Variables bo'limidan olamiz
 TOKEN = os.getenv("BOT_TOKEN")
 
 # ===== DATA STORAGE =====
@@ -32,7 +28,7 @@ correct_answers = {}
 pdf_files = {}
 test_category = {}
 user_results = {}
-all_users = set()
+all_users = set()  # Barcha foydalanuvchilar IDlari
 user_answers_storage = {} 
 admin_state = {}
 
@@ -70,6 +66,7 @@ def get_main_keyboard(user_id):
     ]
     if user_id == ADMIN_ID:
         buttons.append([KeyboardButton("➕ TEST QO‘SHISH"), KeyboardButton("🔑 KALIT YUKLASH")])
+        buttons.append([KeyboardButton("👤 FOYDALANUVCHILAR")]) # Tugma qo'shildi
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def start_test_menu():
@@ -89,6 +86,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
     user_data = context.user_data
+
+    # --- FOYDALANUVCHILARNI KO'RISH (ADMIN UCHUN) ---
+    if text == "👤 FOYDALANUVCHILAR" and user_id == ADMIN_ID:
+        count = len(all_users)
+        msg = f"👤 **Jami foydalanuvchilar:** {count} ta\n\n"
+        if count > 0:
+            msg += "ID raqamlar:\n" + "\n".join([f"• `{uid}`" for uid in list(all_users)[:50]]) # Dastlabki 50 tasini ko'rsatish
+        await update.message.reply_text(msg, parse_mode="Markdown")
+        return
 
     # --- NATIJA CHIQARISH ---
     if text == "📊 NATIJA CHIQARISH":
@@ -113,7 +119,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data.clear()
         return
 
-    # --- ADMIN ---
+    # --- ADMIN FUNKSIYALARI ---
     if user_id == ADMIN_ID and user_id in admin_state:
         state = admin_state[user_id]
         if state == "choose_category":
@@ -142,7 +148,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del admin_state[user_id]
             return
 
-    # --- MENU ---
+    # --- MENU NAVIGATION ---
     if text == "🔙 ASOSIY MENYU":
         user_data.clear()
         await update.message.reply_text("🏠 Asosiy menu:", reply_markup=get_main_keyboard(user_id))
@@ -153,21 +159,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     elif text == "🔑 KALIT YUKLASH" and user_id == ADMIN_ID:
         admin_state[user_id] = "key_id"
-        await update.message.reply_text("ID raqamni yozing:")
+        await update.message.reply_text("Test ID raqamini kiriting:")
+        return
+    elif text == "👨‍💻 Adminga bog'lanish":
+        await update.message.reply_text("Savollar bo'yicha: @miracle_0023") #
         return
 
-    # --- TESTLAR ---
+    # --- TESTLARNI TANLASH ---
     if "MILLIY" in text or "DTM" in text:
         sel_cat = ""
         if "Matematika" in text and "MILLIY" in text: sel_cat="MAT_MILLIY"
         elif "Fizika" in text and "MILLIY" in text: sel_cat="FIZ_MILLIY"
         elif "Matematika" in text and "DTM" in text: sel_cat="MAT_DTM"
         elif "Fizika" in text and "DTM" in text: sel_cat="FIZ_DTM"
+        
         available = [tid for tid, cat in test_category.items() if cat == sel_cat]
         if not available:
             await update.message.reply_text("⚠️ Hozircha bu bo'limda test yo'q.")
             return
-        user_data['selected_test_id'], user_data['state'] = available[0], 'waiting_test'
+        user_data['selected_test_id'] = available[0]
+        user_data['state'] = 'waiting_test'
         await update.message.reply_text(f"💎 Test topildi: {available[0]}\nBoshlaymizmi?", reply_markup=start_test_menu())
         return
 
@@ -186,7 +197,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if uid not in user_answers_storage: user_answers_storage[uid] = {}
         user_answers_storage[uid][tid] = ans
         save_data()
-        await update.message.reply_text(f"✅ Qabul qilindi! Natijani bilish uchun NATIJA bo'limiga `{tid}` ID-ni yuboring.", reply_markup=get_main_keyboard(user_id))
+        await update.message.reply_text(f"✅ Qabul qilindi! Natijani bilish uchun ID: `{tid}` ni NATIJA bo'limiga yuboring.", reply_markup=get_main_keyboard(user_id))
         user_data.clear()
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -204,11 +215,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== RUN =====
 if __name__ == "__main__":
     load_data()
-    # Flaskni alohida thread'da boshlaymiz
     threading.Thread(target=run_flask, daemon=True).start()
     
     if not TOKEN:
-        print("❌ XATO: BOT_TOKEN topilmadi! Render Settings'ga kiring.")
+        print("❌ XATO: BOT_TOKEN topilmadi!")
     else:
         app = ApplicationBuilder().token(TOKEN).build()
         app.add_handler(CommandHandler("start", start))
