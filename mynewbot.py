@@ -3,16 +3,17 @@ import os
 import re
 import json
 import threading
+import asyncio
 from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# ===== RENDER PORTNI BAND QILISH =====
+# ===== RENDER PORTNI BAND QILISH (Xatolikni oldini oladi) =====
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
-    return "Bot is live!"
+    return "Bot is active!"
 
 def run_flask():
     # Render 10000-portni talab qiladi
@@ -22,28 +23,28 @@ def run_flask():
 # ===== SOZLAMALAR =====
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 ADMIN_ID = 6257157305
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN") # Render Environment Variables'dan olinadi
 
-# Ma'lumotlar bazasi (JSON fayl bilan)
+# Ma'lumotlarni saqlash fayli
 DATA_FILE = "bot_data.json"
 
-def load_all_data():
+def load_db():
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
-    return {"answers": {}, "pdfs": {}, "categories": {}, "users": []}
+        try:
+            with open(DATA_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"answers": {}, "pdfs": {}, "categories": {}, "users": [], "results": {}}
 
-db = load_all_data()
+db = load_db()
 
-def save_all_data():
+def save_db():
     with open(DATA_FILE, "w") as f:
         json.dump(db, f)
 
-# ===== ADMIN STATE =====
-admin_temp_data = {}
-
 # ===== KLAVIATURA =====
-def main_menu(user_id):
+def get_main_keyboard(user_id):
     btns = [
         [KeyboardButton("🏅 MILLIY SERTIFIKAT (Matematika)"), KeyboardButton("🏅 MILLIY SERTIFIKAT (Fizika)")],
         [KeyboardButton("🏛️ DTM TESTLAR (Matematika)"), KeyboardButton("🏛️ DTM TESTLAR (Fizika)")],
@@ -51,85 +52,155 @@ def main_menu(user_id):
     ]
     if user_id == ADMIN_ID:
         btns.append([KeyboardButton("➕ TEST QO‘SHISH"), KeyboardButton("🔑 KALIT YUKLASH")])
+        btns.append([KeyboardButton("👤 FOYDALANUVCHILAR")])
     return ReplyKeyboardMarkup(btns, resize_keyboard=True)
 
-# ===== BOT LOGIKASI =====
+# ===== BOT HANDLERLARI =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid not in db["users"]:
-        db["users"].append(uid)
-        save_all_data()
-    await update.message.reply_text("Xush kelibsiz!", reply_markup=main_menu(uid))
+    user_id = update.effective_user.id
+    if user_id not in db["users"]:
+        db["users"].append(user_id)
+        save_db()
+    await update.message.reply_text("👋 Assalomu alaykum! Kerakli bo'limni tanlang:", reply_markup=get_main_keyboard(user_id))
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    uid = update.effective_user.id
+    user_id = update.effective_user.id
+    udata = context.user_data
 
-    if text == "➕ TEST QO‘SHISH" and uid == ADMIN_ID:
-        context.user_data['step'] = 'get_cat'
-        await update.message.reply_text("Kategoriyani tanlang:\n1. MAT_MILLIY\n2. FIZ_MILLIY")
+    # Admin: Foydalanuvchilar soni
+    if text == "👤 FOYDALANUVCHILAR" and user_id == ADMIN_ID:
+        await update.message.reply_text(f"👤 Jami a'zolar: {len(db['users'])} ta")
         return
 
-    if context.user_data.get('step') == 'get_cat':
-        context.user_data['cat'] = "MAT_MILLIY" if text == "1" else "FIZ_MILLIY"
-        context.user_data['step'] = 'get_id'
-        await update.message.reply_text("Test uchun ID raqam yozing:")
+    # Admin: Test qo'shish boshlanishi
+    if text == "➕ TEST QO‘SHISH" and user_id == ADMIN_ID:
+        udata['step'] = 'choose_cat'
+        await update.message.reply_text("Kategoriyani tanlang:\n1. MAT_MILLIY\n2. FIZ_MILLIY\n3. MAT_DTM\n4. FIZ_DTM")
         return
 
-    if context.user_data.get('step') == 'get_id':
-        context.user_data['tid'] = text
-        context.user_data['step'] = 'get_pdf'
-        await update.message.reply_text("Endi PDF faylini yuboring.")
+    # Bosqichma-bosqich ma'lumot yig'ish
+    step = udata.get('step')
+
+    if step == 'choose_cat':
+        cats = {"1": "MAT_MILLIY", "2": "FIZ_MILLIY", "3": "MAT_DTM", "4": "FIZ_DTM"}
+        if text in cats:
+            udata['cat'] = cats[text]
+            udata['step'] = 'get_id'
+            await update.message.reply_text("Ushbu test uchun ID raqam yozing (masalan: 101):")
         return
 
-    # Kalit yuklash qismi
-    if text == "🔑 KALIT YUKLASH" and uid == ADMIN_ID:
-        context.user_data['step'] = 'key_id'
-        await update.message.reply_text("Qaysi ID uchun kalit yuklaysiz?")
+    if step == 'get_id':
+        udata['tid'] = text
+        udata['step'] = 'get_pdf'
+        await update.message.reply_text(f"ID {text} uchun PDF faylni yuboring.")
         return
 
-    if context.user_data.get('step') == 'key_id':
-        context.user_data['target_id'] = text
-        context.user_data['step'] = 'key_val'
-        await update.message.reply_text("Kalitlarni yuboring (masalan: abcd...):")
+    # Admin: Kalit yuklash
+    if text == "🔑 KALIT YUKLASH" and user_id == ADMIN_ID:
+        udata['step'] = 'key_id'
+        await update.message.reply_text("Qaysi Test ID uchun kalit yuklamoqchisiz?")
         return
 
-    if context.user_data.get('step') == 'key_val':
-        tid = context.user_data['target_id']
-        db["answers"][tid] = text.lower()
-        save_all_data()
-        await update.message.reply_text(f"Tayyor! {tid} uchun kalitlar saqlandi.")
-        context.user_data.clear()
+    if step == 'key_id':
+        udata['target_tid'] = text
+        udata['step'] = 'key_val'
+        await update.message.reply_text("Kalitlarni kiriting (masalan: abcd...):")
         return
 
-async def handle_docs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if uid == ADMIN_ID and context.user_data.get('step') == 'get_pdf':
-        tid = context.user_data['tid']
-        cat = context.user_data['cat']
-        file = await context.bot.get_file(update.message.document.file_id)
-        path = f"{tid}.pdf"
-        await file.download_to_drive(path)
-        db["pdfs"][tid] = path
-        db["categories"][tid] = cat
-        save_all_data()
-        await update.message.reply_text("Test muvaffaqiyatli qo'shildi!")
-        context.user_data.clear()
+    if step == 'key_val':
+        tid = udata['target_tid']
+        db['answers'][tid] = re.sub(r'[^a-zA-Z]', '', text).lower()
+        save_db()
+        await update.message.reply_text(f"✅ {tid} ID uchun kalitlar saqlandi!", reply_markup=get_main_keyboard(user_id))
+        udata.clear()
+        return
 
-# ===== ASOSIY ISHGA TUSHIRISH =====
+    # Natija chiqarish
+    if text == "📊 NATIJA CHIQARISH":
+        udata['step'] = 'check_res'
+        await update.message.reply_text("Natijani bilish uchun Test ID raqamini yuboring:")
+        return
+
+    if step == 'check_res':
+        tid = text.strip()
+        uid_str = str(user_id)
+        if tid in db['results'].get(uid_str, {}):
+            u_ans = db['results'][uid_str][tid]
+            c_ans = db['answers'].get(tid)
+            if not c_ans:
+                await update.message.reply_text("❗ Bu test uchun kalitlar hali yuklanmagan.")
+            else:
+                correct = sum(1 for u, c in zip(u_ans, c_ans) if u == c)
+                total = len(c_ans)
+                await update.message.reply_text(f"🎯 Natijangiz:\n✅ To'g'ri: {correct}/{total}\n📈 Foiz: {(correct*100)//total}%")
+        else:
+            await update.message.reply_text("❌ Siz bu testni hali topshirmagansiz.")
+        udata.clear()
+        return
+
+    # Test bo'limlarini tanlash
+    category_map = {
+        "🏅 MILLIY SERTIFIKAT (Matematika)": "MAT_MILLIY",
+        "🏅 MILLIY SERTIFIKAT (Fizika)": "FIZ_MILLIY",
+        "🏛️ DTM TESTLAR (Matematika)": "MAT_DTM",
+        "🏛️ DTM TESTLAR (Fizika)": "FIZ_DTM"
+    }
+    
+    if text in category_map:
+        target_cat = category_map[text]
+        available = [tid for tid, cat in db['categories'].items() if cat == target_cat]
+        if not available:
+            await update.message.reply_text("⚠️ Hozircha bu bo'limda testlar yo'q.")
+        else:
+            tid = available[0] # Eng oxirgi qo'shilganini chiqarish mantiqi
+            path = db['pdfs'].get(tid)
+            if path and os.path.exists(path):
+                udata['active_tid'] = tid
+                udata['step'] = 'solving'
+                await update.message.reply_document(document=open(path, 'rb'), caption=f"📝 Test ID: {tid}\n\nJavoblarni shunchaki matn ko'rinishida yuboring.")
+        return
+
+    if step == 'solving':
+        tid = udata['active_tid']
+        ans = re.sub(r'[^a-zA-Z]', '', text).lower()
+        uid_str = str(user_id)
+        if uid_str not in db['results']: db['results'][uid_str] = {}
+        db['results'][uid_str][tid] = ans
+        save_db()
+        await update.message.reply_text("✅ Javoblaringiz qabul qilindi! Natijani bilish uchun 'NATIJA CHIQARISH' tugmasini bosing.")
+        udata.clear()
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    udata = context.user_data
+    if user_id == ADMIN_ID and udata.get('step') == 'get_pdf':
+        doc = update.message.document
+        tid = udata['tid']
+        cat = udata['cat']
+        f_name = f"{tid}.pdf"
+        file = await context.bot.get_file(doc.file_id)
+        await file.download_to_drive(f_name)
+        db['pdfs'][tid] = f_name
+        db['categories'][tid] = cat
+        save_db()
+        await update.message.reply_text(f"✅ Test muvaffaqiyatli saqlandi! ID: {tid}", reply_markup=get_main_keyboard(user_id))
+        udata.clear()
+
+# ===== MAIN RUN =====
 if __name__ == "__main__":
-    # 1. Flaskni alohida thread'da yoqish
+    # Flask port band qilish
     threading.Thread(target=run_flask, daemon=True).start()
-
+    
     if not TOKEN:
-        print("XATO: BOT_TOKEN topilmadi!")
+        logging.error("❌ TOKEN TOPILMADI!")
     else:
-        # 2. Telegram botni sozlash (v20.8 versiya uchun)
-        application = ApplicationBuilder().token(TOKEN).build()
+        # v20.x uchun barqaror ishga tushirish
+        app = ApplicationBuilder().token(TOKEN).build()
         
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-        application.add_handler(MessageHandler(filters.Document.ALL, handle_docs))
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+        app.add_handler(MessageHandler(filters.Document.PDF, handle_document))
         
-        print("Bot ishlamoqda...")
-        application.run_polling(drop_pending_updates=True)
+        logging.info("Bot ishga tushmoqda...")
+        app.run_polling(drop_pending_updates=True)
