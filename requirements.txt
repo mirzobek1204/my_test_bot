@@ -1,4 +1,4 @@
-python-telegram-bot
+python-telegram-bot==20.8
+flask==3.0.2
 matplotlib
-flask
 gunicorn
