@@ -130,7 +130,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data.clear()
             return
 
-    if text == "📊 NATIJA TIKSHIRISH":
+    if text == "📊 NATIJA TEKSHIRISH":
         user_data['state'] = 'check_id'
         # Menyuni almashtiramiz
         await update.message.reply_text("📝 Test ID-ni yozing:", reply_markup=get_back_keyboard())
