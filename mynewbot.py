@@ -8,12 +8,9 @@ from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-try:
-    import pymongo
-except ImportError:
-    pymongo = None
+# ===== LOGGING & SERVER (Render uchun) =====
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# ===== SERVER (Render uchun) =====
 server = Flask('')
 @server.route('/')
 def home(): return "Bot is live! 🚀"
@@ -22,44 +19,45 @@ def run():
     port = int(os.environ.get("PORT", 10000))
     server.run(host='0.0.0.0', port=port)
 
-# ===== DATABASE (MongoDB Atlas) =====
+# ===== DATABASE (Ma'lumotlarni saqlash) =====
 MONGO_URL = os.getenv("MONGO_URL") 
 db = {"answers": {}, "pdfs": {}, "categories": {}, "users": [], "results": {}}
 
 def save_data():
-    with open("data.json", "w") as f:
+    with open("data.json", "w") as f: 
         json.dump(db, f, indent=4)
-    if MONGO_URL and pymongo:
-        try:
-            client = pymongo.MongoClient(MONGO_URL)
-            collection = client["test_arena_db"]["bot_data"]
-            collection.update_one({"_id": "main_storage"}, {"$set": db}, upsert=True)
-        except Exception as e:
-            logging.error(f"Database error: {e}")
+    try:
+        from pymongo import MongoClient
+        client = MongoClient(MONGO_URL)
+        client["test_arena_db"]["bot_data"].update_one({"_id": "main_storage"}, {"$set": db}, upsert=True)
+    except: pass
 
 def load_data():
     global db
-    if MONGO_URL and pymongo:
-        try:
-            client = pymongo.MongoClient(MONGO_URL)
-            data = client["test_arena_db"]["bot_data"].find_one({"_id": "main_storage"})
-            if data:
-                for k in db.keys():
-                    if k in data: db[k] = data[k]
-                return
-        except: pass
+    try:
+        from pymongo import MongoClient
+        client = MongoClient(MONGO_URL)
+        data = client["test_arena_db"]["bot_data"].find_one({"_id": "main_storage"})
+        if data:
+            for k in db.keys():
+                if k in data: db[k] = data[k]
+            return
+    except: pass
     if os.path.exists("data.json"):
         with open("data.json", "r") as f:
             loaded = json.load(f)
             for k in db.keys():
                 if k in loaded: db[k] = loaded[k]
 
-# ===== KEYBOARDS =====
+# ===== CONFIG & KEYBOARDS =====
+ADMIN_ID = 6257157305
+TOKEN = os.getenv("BOT_TOKEN")
+
 def get_main_keyboard(user_id):
     btns = [
         [KeyboardButton("🥇 MILLIY SERTIFIKAT (Matematika)"), KeyboardButton("🥇 MILLIY SERTIFIKAT (Fizika)")],
         [KeyboardButton("🏛️ DTM TESTLAR (Matematika)"), KeyboardButton("🏛️ DTM TESTLAR (Fizika)")],
-        [KeyboardButton("📊 NATIJA TEKSHIRISH"), KeyboardButton("📜 MENING NATIJALARIM")],
+        [KeyboardButton("📊 NATIJA TIKSHIRISH"), KeyboardButton("📜 MENING NATIJALARIM")],
         [KeyboardButton("👨‍💻 Adminga bog'lanish")]
     ]
     if user_id == ADMIN_ID:
@@ -68,12 +66,7 @@ def get_main_keyboard(user_id):
     return ReplyKeyboardMarkup(btns, resize_keyboard=True)
 
 def get_back_keyboard():
-    # FAQAT SHU TUGMA QOLADI
     return ReplyKeyboardMarkup([[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True)
-
-# ===== CONFIG =====
-ADMIN_ID = 6257157305
-TOKEN = os.getenv("BOT_TOKEN")
 
 # ===== HANDLERS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -87,111 +80,94 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     user_data = context.user_data
 
-    # 1. HAR DOIM ISHLAYDIGAN TUGMALAR
-    if text == "👨‍💻 Adminga bog'lanish":
-        await update.message.reply_text("👨‍💻 Admin bilan bog'lanish: @miracle_1204")
-        return
-
+    # 1. UNIVERSAL TUGMALAR
     if text == "🔙 ASOSIY MENYU" or text == "🛑 TESTNI YAKUNLASH":
         user_data.clear()
-        await update.message.reply_text("🏠 Asosiy menyu:", reply_markup=get_main_keyboard(int(uid)))
-        return
+        return await update.message.reply_text("🏠 Asosiy menyu:", reply_markup=get_main_keyboard(int(uid)))
 
-    # 2. ADMIN FUNKSIYALARI
+    if text == "👨‍💻 Adminga bog'lanish":
+        return await update.message.reply_text("👨‍💻 Admin bilan bog'lanish: @miracle_1204")
+
+    # 2. ADMIN FUNKSIYALARI (Statistika va boshqalar)
     if int(uid) == ADMIN_ID:
+        if text == "👥 STATISTIKA":
+            u_count = len(db.get("users", []))
+            t_count = len(db.get("answers", {}))
+            return await update.message.reply_text(f"👤 Foydalanuvchilar: {u_count}\n📝 Testlar: {t_count}")
+
         if text == "➕ TEST QO'SHISH":
             user_data['admin_state'] = "cat"
-            await update.message.reply_text("Bo'limni tanlang:\n1. Mat Milliy\n2. Fiz Milliy\n3. Mat DTM\n4. Fiz DTM", reply_markup=get_back_keyboard())
-            return
+            return await update.message.reply_text("Bo'limni tanlang:\n1. Mat Milliy\n2. Fiz Milliy\n3. Mat DTM\n4. Fiz DTM", reply_markup=get_back_keyboard())
         
         if user_data.get('admin_state') == "cat":
             cs = {"1":"MAT_MILLIY","2":"FIZ_MILLIY","3":"MAT_DTM","4":"FIZ_DTM"}
             if text in cs:
                 user_data["tcat"], user_data['admin_state'] = cs[text], "tid"
-                await update.message.reply_text("Test uchun ID kiriting:", reply_markup=get_back_keyboard())
-            return
+                return await update.message.reply_text("Test uchun ID kiriting (Masalan: M-01):", reply_markup=get_back_keyboard())
 
         if user_data.get('admin_state') == "tid":
             user_data["ttid"], user_data['admin_state'] = text.upper(), "tfile"
-            await update.message.reply_text(f"ID: {text.upper()} qabul qilindi. PDF faylni yuboring:", reply_markup=get_back_keyboard())
-            return
+            return await update.message.reply_text(f"ID: {text.upper()}. Endi PDF faylni yuboring:", reply_markup=get_back_keyboard())
 
         if text == "🔑 KALIT YUKLASH":
             user_data['admin_state'] = "kid"
-            await update.message.reply_text("Kalit yuklanadigan Test ID-ni yozing:", reply_markup=get_back_keyboard())
-            return
+            return await update.message.reply_text("Kalit yuklanadigan Test ID-ni yozing:", reply_markup=get_back_keyboard())
 
         if user_data.get('admin_state') == "kid":
             user_data["tkid"], user_data['admin_state'] = text.upper(), "kval"
-            await update.message.reply_text(f"'{text.upper()}' uchun kalitlarni yuboring:", reply_markup=get_back_keyboard())
-            return
+            return await update.message.reply_text(f"'{text.upper()}' uchun kalitlarni yuboring:", reply_markup=get_back_keyboard())
 
         if user_data.get('admin_state') == "kval":
             db["answers"][user_data["tkid"]] = re.sub(r'[^a-eA-E]', '', text).lower()
             save_data()
-            await update.message.reply_text("✅ Kalit saqlandi!", reply_markup=get_main_keyboard(ADMIN_ID))
             user_data.clear()
-            return
+            return await update.message.reply_text("✅ Kalitlar muvaffaqiyatli saqlandi!", reply_markup=get_main_keyboard(ADMIN_ID))
 
-    # 3. FOYDALANUVCHI FUNKSIYALARI (O'ZGARISH SHU YERDA)
-    if text == "📊 NATIJA TEKSHIRISH":
+    # 3. FOYDALANUVCHI FUNKSIYALARI (Natija tekshirish)
+    if text == "📊 NATIJA TIKSHIRISH":
         user_data['state'] = 'check_id'
-        # Menyuni almashtiramiz
-        await update.message.reply_text("📝 Test ID-ni yozing:", reply_markup=get_back_keyboard())
-        return
+        return await update.message.reply_text("📝 Test ID-ni yozing:", reply_markup=get_back_keyboard())
 
     if user_data.get('state') == 'check_id':
         tid = text.upper()
         if tid not in db["answers"]:
-            await update.message.reply_text(f"❌ '{tid}' ID topilmadi. Qayta yozing:", reply_markup=get_back_keyboard())
-        else:
-            user_data['ctid'], user_data['state'] = tid, 'check_ans'
-            await update.message.reply_text(f"✅ {tid} topildi. Endi javoblarni yuboring (abcd...):", reply_markup=get_back_keyboard())
-        return
+            return await update.message.reply_text(f"❌ '{tid}' ID topilmadi. Qayta yozing:", reply_markup=get_back_keyboard())
+        user_data.update({"ctid": tid, "state": "check_ans"})
+        return await update.message.reply_text(f"✅ {tid} topildi. Javoblarni yuboring (masalan: abcd...):", reply_markup=get_back_keyboard())
 
     if user_data.get('state') == 'check_ans':
         tid = user_data['ctid']
         correct = db["answers"][tid]
         u_ans = re.sub(r'[^a-eA-E]', '', text).lower()
-        score, analysis = 0, ""
-        for i in range(len(correct)):
-            ua = u_ans[i] if i < len(u_ans) else "?"
-            ca = correct[i]
-            analysis += f"{i+1}. {'✅' if ua == ca else '❌ ('+ua.upper()+')'}\n"
-            if ua == ca: score += 1
-        
+        score = sum(1 for i, char in enumerate(correct) if i < len(u_ans) and u_ans[i] == char)
         perc = (score * 100) // len(correct)
-        dt = datetime.now().strftime("%d/%m %H:%M")
-        if uid not in db["results"]: db["results"][uid] = []
-        db["results"][uid].append({"id": tid, "score": score, "total": len(correct), "percent": perc, "date": dt})
-        save_data()
-        # Natija chiqib bo'lgach, menyuni qaytaramiz
-        await update.message.reply_text(f"📊 Natija: {score}/{len(correct)} ({perc}%)\n\n{analysis}", reply_markup=get_main_keyboard(int(uid)))
+        
+        await update.message.reply_text(f"📊 Natija: {score}/{len(correct)} ({perc}%)", reply_markup=get_main_keyboard(int(uid)))
         user_data.clear()
+        save_data()
         return
 
-    # TESTLARNI KO'RSATISH
+    # TESTLAR BO'LIMI
     if "MILLIY" in text or "DTM" in text:
-        if "Matematika" in text and "MILLIY" in text: sc = "MAT_MILLIY"
-        elif "Fizika" in text and "MILLIY" in text: sc = "FIZ_MILLIY"
-        elif "Matematika" in text and "DTM" in text: sc = "MAT_DTM"
-        else: sc = "FIZ_DTM"
+        # Bo'limni aniqlash
+        sc = "MAT_MILLIY" if "Matematika" in text and "MILLIY" in text else \
+             "FIZ_MILLIY" if "Fizika" in text and "MILLIY" in text else \
+             "MAT_DTM" if "Matematika" in text and "DTM" in text else "FIZ_DTM"
         
         av = [t for t, c in db["categories"].items() if c == sc]
         if not av:
-            await update.message.reply_text("⚠️ Testlar yo'q.")
-            return
-        btns = [[KeyboardButton(t)] for t in av]
-        btns.append([KeyboardButton("🔙 ASOSIY MENYU")])
+            return await update.message.reply_text("⚠️ Bu bo'limda testlar yo'q.")
+        
+        btns = [[KeyboardButton(t)] for t in av] + [[KeyboardButton("🔙 ASOSIY MENYU")]]
         user_data['state'] = 'choosing'
-        await update.message.reply_text("📑 Testni tanlang:", reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True))
-        return
+        return await update.message.reply_text("📑 Testni tanlang:", reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True))
 
     if user_data.get('state') == 'choosing' and text in db["categories"]:
         path = db["pdfs"].get(text)
         if path and os.path.exists(path):
             await update.message.reply_document(document=open(path, 'rb'), caption=f"ID: {text}", 
                                                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🛑 TESTNI YAKUNLASH")]], resize_keyboard=True))
+        return
 
 async def handle_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID and context.user_data.get('admin_state') == "tfile":
@@ -201,9 +177,10 @@ async def handle_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await file.download_to_drive(path)
         db["pdfs"][tid], db["categories"][tid] = path, cat
         save_data()
-        await update.message.reply_text(f"✅ Test yuklandi!", reply_markup=get_main_keyboard(ADMIN_ID))
+        await update.message.reply_text(f"✅ Test {tid} muvaffaqiyatli yuklandi!", reply_markup=get_main_keyboard(ADMIN_ID))
         context.user_data.clear()
 
+# ===== RUN =====
 if __name__ == "__main__":
     load_data()
     threading.Thread(target=run, daemon=True).start()
@@ -212,4 +189,5 @@ if __name__ == "__main__":
         app.add_handler(CommandHandler("start", start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_handler(MessageHandler(filters.Document.PDF, handle_doc))
+        print("Bot ishlamoqda... 🚀")
         app.run_polling(drop_pending_updates=True)
