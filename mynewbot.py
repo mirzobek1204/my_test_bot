@@ -32,7 +32,6 @@ def save_data():
         try:
             client = pymongo.MongoClient(MONGO_URL)
             collection = client["test_arena_db"]["bot_data"]
-            # MongoDB-ga 'results' va boshqa barcha ma'lumotlarni yozamiz
             collection.update_one({"_id": "main_storage"}, {"$set": db}, upsert=True)
         except Exception as e:
             logging.error(f"Database error: {e}")
@@ -58,17 +57,17 @@ def load_data():
 ADMIN_ID = 6257157305
 TOKEN = os.getenv("BOT_TOKEN")
 
-# ===== KEYBOARDS (Small Caps Style) =====
+# ===== KEYBOARDS (Rasmdagi ko'rinishda) =====
 def get_main_keyboard(user_id):
     btns = [
-        [KeyboardButton("🥇 ᴍɪʟʟɪʏ (ᴍᴀᴛᴇᴍᴀᴛɪᴋᴀ)"), KeyboardButton("🥇 ᴍɪʟʟɪʏ (ғɪᴢɪᴋᴀ)")],
-        [KeyboardButton("🏛️ ᴅᴛᴍ (ᴍᴀᴛᴇᴍᴀᴛɪᴋᴀ)"), KeyboardButton("🏛️ ᴅᴛᴍ (ғɪᴢɪᴋᴀ)")],
-        [KeyboardButton("📊 ɴᴀᴛɪᴊᴀ ᴛᴇᴋsʜɪʀɪsʜ"), KeyboardButton("📜 ᴍᴇɴɪɴɢ ɴᴀᴛɪᴊᴀʟᴀʀɪᴍ")],
-        [KeyboardButton("👨‍💻 ᴀᴅᴍɪɴɢᴀ ʙᴏɢ'ʟᴀɴɪsʜ")]
+        [KeyboardButton("🥇 MILLIY SERTIFIKAT (Matematika)"), KeyboardButton("🥇 MILLIY SERTIFIKAT (Fizika)")],
+        [KeyboardButton("🏛️ DTM TESTLAR (Matematika)"), KeyboardButton("🏛️ DTM TESTLAR (Fizika)")],
+        [KeyboardButton("📊 NATIJA TIKSHIRISH"), KeyboardButton("📜 MENING NATIJALARIM")],
+        [KeyboardButton("👨‍💻 Adminga bog'lanish")]
     ]
     if user_id == ADMIN_ID:
-        btns.append([KeyboardButton("➕ ᴛᴇsᴛ ǫᴏ'sʜɪsʜ"), KeyboardButton("🔑 ᴋᴀʟɪᴛ ʏᴜᴋʟᴀsʜ")])
-        btns.append([KeyboardButton("👥 sᴛᴀᴛɪsᴛɪᴋᴀ")])
+        btns.append([KeyboardButton("➕ TEST QO'SHISH"), KeyboardButton("🔑 KALIT YUKLASH")])
+        btns.append([KeyboardButton("👥 STATISTIKA")])
     return ReplyKeyboardMarkup(btns, resize_keyboard=True)
 
 # ===== HANDLERS =====
@@ -77,38 +76,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid not in db["users"]: db["users"].append(uid)
     if uid not in db["results"]: db["results"][uid] = []
     save_data()
-    await update.message.reply_text("🚀 **TestArena1-ga xush kelibsiz!**\n\nBo'limni tanlang:", 
-                                   reply_markup=get_main_keyboard(int(uid)), parse_mode='Markdown')
+    await update.message.reply_text("👋 Assalomu alaykum! Botga xush kelibsiz.\nBo'limni tanlang 👇", 
+                                   reply_markup=get_main_keyboard(int(uid)))
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     uid = str(update.effective_user.id)
     user_data = context.user_data
 
-    # --- 1. HAR DOIM ISHLAYDIGAN TUGMALAR (Admin & Navigatsiya) ---
-    if text == "👨‍💻 ᴀᴅᴍɪɴɢᴀ ʙᴏɢ'ʟᴀɴɪsʜ":
+    # --- 1. HAR DOIM ISHLAYDIGAN TUGMALAR ---
+    if text == "👨‍💻 Adminga bog'lanish":
         await update.message.reply_text("👨‍💻 Admin bilan bog'lanish: @miracle_1204")
         return
 
-    if text == "🔙 ᴀsᴏsɪʏ ᴍᴇɴʏᴜ" or text == "🛑 ᴛᴇsᴛɴɪ ʏᴀᴋᴜɴʟᴀsʜ":
+    if text == "🔙 ASOSIY MENYU" or text == "🛑 TESTNI YAKUNLASH":
         user_data.clear()
         await update.message.reply_text("🏠 Asosiy menyu:", reply_markup=get_main_keyboard(int(uid)))
         return
 
-    # --- 2. TARIX VA STATISTIKA ---
-    if text == "📜 ᴍᴇɴɪɴɢ ɴᴀᴛɪᴊᴀʟᴀʀɪᴍ":
+    # --- 2. TARIX ---
+    if text == "📜 MENING NATIJALARIM":
         hist = db["results"].get(uid, [])
         if not hist:
             await update.message.reply_text("📭 Tarixingiz hali bo'sh.")
             return
-        msg = "📜 **SIZNING NATIJALARINGIZ (Oxirgi 10 ta):**\n\n"
+        msg = "📜 **SIZNING NATIJALARINGIZ:**\n\n"
         for r in hist[-10:]:
             msg += f"📅 {r['date']} | ID: {r['id']}\n✅ {r['score']}/{r['total']} ({r['percent']}%)\n---\n"
         await update.message.reply_text(msg, parse_mode='Markdown')
         return
 
-    # --- 3. NATIJA TEKSHIRISH + XATOLAR TAHLILI ---
-    if text == "📊 ɴᴀᴛɪᴊᴀ ᴛᴇᴋsʜɪʀɪsʜ":
+    # --- 3. NATIJA TEKSHIRISH ---
+    if text == "📊 NATIJA TIKSHIRISH":
         user_data['state'] = 'check_id'
         await update.message.reply_text("Natijani bilish uchun **Test ID** raqamini yozing:", parse_mode='Markdown')
         return
@@ -137,39 +136,61 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 analysis += f"{i+1}. ❌ (Siz: {ua.upper()}, Aslida: {ca.upper()})\n"
         perc = (score * 100) // len(correct)
         dt = datetime.now().strftime("%d/%m %H:%M")
-        
-        # Tarixga saqlash
         if uid not in db["results"]: db["results"][uid] = []
         db["results"][uid].append({"id": tid, "score": score, "total": len(correct), "percent": perc, "date": dt})
         save_data()
-
-        res_msg = f"📊 **NATIJA: {tid}**\n✅ To'g'ri: {score}/{len(correct)}\n📈 Foiz: {perc}%\n\n📝 **XATOLAR TAHLILI:**\n{analysis}"
+        res_msg = f"📊 **NATIJA: {tid}**\n✅ To'g'ri: {score}/{len(correct)}\n📈 Foiz: {perc}%\n\n📝 **TAHLIL:**\n{analysis}"
         await update.message.reply_text(res_msg, parse_mode='Markdown', reply_markup=get_main_keyboard(int(uid)))
         user_data.clear()
         return
 
-    # --- 4. ADMIN FUNKSIYALARI ---
-    if int(uid) == ADMIN_ID:
-        if text == "👥 sᴛᴀᴛɪsᴛɪᴋᴀ":
-            await update.message.reply_text(f"👤 Jami userlar: {len(db['users'])}\n📝 Testlar: {len(db['pdfs'])}")
+    # --- 4. TESTLARNI KO'RSATISH ---
+    if "MILLIY SERTIFIKAT" in text or "DTM TESTLAR" in text:
+        if "Matematika" in text and "MILLIY" in text: sc = "MAT_MILLIY"
+        elif "Fizika" in text and "MILLIY" in text: sc = "FIZ_MILLIY"
+        elif "Matematika" in text and "DTM" in text: sc = "MAT_DTM"
+        else: sc = "FIZ_DTM"
+        av = [t for t, c in db["categories"].items() if c == sc]
+        if not av:
+            await update.message.reply_text("⚠️ Hozircha bu bo'limda testlar yo'q.")
             return
-        if text == "➕ ᴛᴇsᴛ ǫᴏ'sʜɪsʜ":
+        btns = [[KeyboardButton(t)] for t in av]
+        btns.append([KeyboardButton("🔙 ASOSIY MENYU")])
+        user_data['state'] = 'choosing'
+        await update.message.reply_text("📑 Testni tanlang:", reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True))
+        return
+
+    if user_data.get('state') == 'choosing' and text in db["categories"]:
+        path = db["pdfs"].get(text)
+        if path and os.path.exists(path):
+            await update.message.reply_document(document=open(path, 'rb'), 
+                caption=f"📝 Test ID: {text}\n\n⚠️ Natijani '📊 NATIJA TIKSHIRISH' bo'limida tekshiring.",
+                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🛑 TESTNI YAKUNLASH")]], resize_keyboard=True))
+        return
+
+    # --- 5. ADMIN FUNKSIYALARI ---
+    if int(uid) == ADMIN_ID:
+        if text == "👥 STATISTIKA":
+            await update.message.reply_text(f"👤 Userlar: {len(db['users'])}\n📝 Testlar: {len(db['pdfs'])}")
+            return
+        if text == "➕ TEST QO'SHISH":
             user_data['admin_state'] = "cat"
             await update.message.reply_text("1-Mat Milliy, 2-Fiz Milliy, 3-Mat DTM, 4-Fiz DTM")
             return
+        # (Admin boshqa mantiqlari...)
         if user_data.get('admin_state') == "cat":
             cs = {"1":"MAT_MILLIY","2":"FIZ_MILLIY","3":"MAT_DTM","4":"FIZ_DTM"}
             if text in cs:
                 user_data["tcat"], user_data['admin_state'] = cs[text], "tid"
-                await update.message.reply_text("ID kiriting (Masalan: M-01):")
+                await update.message.reply_text("ID kiriting:")
             return
         if user_data.get('admin_state') == "tid":
             user_data["ttid"], user_data['admin_state'] = text.upper(), "tfile"
             await update.message.reply_text("📄 PDF faylni yuboring:")
             return
-        if text == "🔑 ᴋᴀʟɪᴛ ʏᴜᴋʟᴀsʜ":
+        if text == "🔑 KALIT YUKLASH":
             user_data['admin_state'] = "kid"
-            await update.message.reply_text("Kalit yuklanadigan Test ID-ni yozing:")
+            await update.message.reply_text("Test ID-ni yozing:")
             return
         if user_data.get('admin_state') == "kid":
             user_data["tkid"], user_data['admin_state'] = text.upper(), "kval"
@@ -181,30 +202,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Kalitlar saqlandi!", reply_markup=get_main_keyboard(ADMIN_ID))
             user_data.clear()
             return
-
-    # --- 5. TESTLARNI KO'RSATISH ---
-    if "ᴍɪʟʟɪʏ" in text or "ᴅᴛᴍ" in text:
-        if "ᴍᴀᴛᴇᴍᴀᴛɪᴋᴀ" in text and "ᴍɪʟʟɪʏ" in text: sc = "MAT_MILLIY"
-        elif "ғɪᴢɪᴋᴀ" in text and "ᴍɪʟʟɪʏ" in text: sc = "FIZ_MILLIY"
-        elif "ᴍᴀᴛᴇᴍᴀᴛɪᴋᴀ" in text and "ᴅᴛᴍ" in text: sc = "MAT_DTM"
-        else: sc = "FIZ_DTM"
-        av = [t for t, c in db["categories"].items() if c == sc]
-        if not av:
-            await update.message.reply_text("⚠️ Hozircha bu bo'limda testlar yo'q.")
-            return
-        btns = [[KeyboardButton(t)] for t in av]
-        btns.append([KeyboardButton("🔙 ᴀsᴏsɪʏ ᴍᴇɴʏᴜ")])
-        user_data['state'] = 'choosing'
-        await update.message.reply_text("📑 Testni tanlang:", reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True))
-        return
-
-    if user_data.get('state') == 'choosing' and text in db["categories"]:
-        path = db["pdfs"].get(text)
-        if path and os.path.exists(path):
-            await update.message.reply_document(document=open(path, 'rb'), 
-                caption=f"📝 Test ID: {text}\n\n⚠️ Natijangizni '📊 ɴᴀᴛɪᴊᴀ ᴛᴇᴋsʜɪʀɪsʜ' bo'limida tekshirib oling.",
-                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🛑 ᴛᴇsᴛɴɪ ʏᴀᴋᴜɴʟᴀsʜ")]], resize_keyboard=True))
-        return
 
 async def handle_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID and context.user_data.get('admin_state') == "tfile":
@@ -226,4 +223,5 @@ if __name__ == "__main__":
         app.add_handler(CommandHandler("start", start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_handler(MessageHandler(filters.Document.PDF, handle_doc))
+        print("Bot ishlamoqda... 🚀")
         app.run_polling(drop_pending_updates=True)
