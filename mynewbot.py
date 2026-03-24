@@ -15,6 +15,7 @@ def home():
     return "Bot is running!"
 
 def run():
+    # Render portni muhit o'zgaruvchisidan oladi
     port = int(os.environ.get("PORT", 10000))
     server.run(host='0.0.0.0', port=port)
 
@@ -24,40 +25,36 @@ def keep_alive():
     t.start()
 
 # ===== CONFIG =====
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 ADMIN_ID = 6257157305
-TOKEN = os.getenv("BOT_TOKEN") 
+TOKEN = os.getenv("BOT_TOKEN")
 
 # ===== DATA STORAGE =====
-correct_answers = {}
-pdf_files = {}
-test_category = {}
-user_results = {}
-admin_state = {}
+db = {
+    "answers": {},
+    "pdfs": {},
+    "categories": {},
+    "users": [],
+    "results": {}
+}
 
 def save_data():
     try:
-        data = {
-            "answers": correct_answers,
-            "pdfs": pdf_files,
-            "categories": test_category,
-            "user_results": user_results
-        }
         with open("data.json", "w") as f:
-            json.dump(data, f, indent=4)
+            json.dump(db, f, indent=4)
     except Exception as e:
         logging.error(f"Saqlashda xato: {e}")
 
 def load_data():
-    global correct_answers, pdf_files, test_category, user_results
+    global db
     if os.path.exists("data.json"):
         try:
             with open("data.json", "r") as f:
-                data = json.load(f)
-                correct_answers.update(data.get("answers", {}))
-                pdf_files.update(data.get("pdfs", {}))
-                test_category.update(data.get("categories", {}))
-                user_results.update(data.get("user_results", {}))
+                loaded_data = json.load(f)
+                # Faqat mavjud kalitlarni yangilaymiz
+                for key in db.keys():
+                    if key in loaded_data:
+                        db[key] = loaded_data[key]
         except Exception as e:
             logging.error(f"Yuklashda xato: {e}")
 
@@ -69,8 +66,10 @@ def get_main_keyboard(user_id):
         [KeyboardButton("📊 NATIJA CHIQARISH")],
         [KeyboardButton("👨‍💻 Adminga bog'lanish")]
     ]
+    # Faqat admin uchun maxsus bo'limlar
     if user_id == ADMIN_ID:
         buttons.append([KeyboardButton("➕ TEST QO‘SHISH"), KeyboardButton("🔑 KALIT YUKLASH")])
+        buttons.append([KeyboardButton("👥 STATISTIKA")])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
 def start_test_menu():
@@ -82,8 +81,16 @@ def start_test_menu():
 # ===== HANDLERS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    # Foydalanuvchini statistikaga qo'shish
+    if user_id not in db["users"]:
+        db["users"].append(user_id)
+        save_data()
+    
     context.user_data.clear()
-    await update.message.reply_text("👋 Assalomu alaykum! Bo‘limni tanlang 👇", reply_markup=get_main_keyboard(user_id))
+    await update.message.reply_text(
+        "👋 Assalomu alaykum! Botga xush kelibsiz.\nBo‘limni tanlang 👇", 
+        reply_markup=get_main_keyboard(user_id)
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -93,62 +100,69 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. ASOSIY NAVIGATSIYA
     if text == "🔙 ASOSIY MENYU":
         user_data.clear()
-        if user_id in admin_state: del admin_state[user_id]
-        await update.message.reply_text("🏠 Asosiy menyuga qaytdingiz:", reply_markup=get_main_keyboard(user_id))
+        await update.message.reply_text("🏠 Asosiy menyu:", reply_markup=get_main_keyboard(user_id))
         return
 
     elif text == "👨‍💻 Adminga bog'lanish":
         await update.message.reply_text("👨‍💻 Admin bilan bog'lanish: @miracle_1204")
         return
 
-    # 2. ADMIN FUNKSIYALARI
+    # 2. ADMIN BO'LIMI (Faqat ADMIN_ID uchun)
     if user_id == ADMIN_ID:
+        if text == "👥 STATISTIKA":
+            u_count = len(db["users"])
+            t_count = len(db["pdfs"])
+            await update.message.reply_text(
+                f"📊 **BOT STATISTIKASI**\n\n👤 Foydalanuvchilar: {u_count} ta\n📝 Yuklangan testlar: {t_count} ta",
+                parse_mode='Markdown'
+            )
+            return
+
         if text == "➕ TEST QO‘SHISH":
-            admin_state[user_id] = "choose_category"
-            await update.message.reply_text("Bo'limni tanlang:\n1-Mat Milliy\n2-Fiz Milliy\n3-Mat DTM\n4-Fiz DTM", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True))
+            user_data['admin_state'] = "choose_category"
+            await update.message.reply_text("Kategoriyani tanlang:\n1-Mat Milliy\n2-Fiz Milliy\n3-Mat DTM\n4-Fiz DTM")
             return
 
         if text == "🔑 KALIT YUKLASH":
-            admin_state[user_id] = "key_id"
-            await update.message.reply_text("Kalit yuklanadigan Test ID raqamini yozing:", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True))
+            user_data['admin_state'] = "key_id"
+            await update.message.reply_text("Kalit yuklanadigan Test ID raqamini yozing:")
             return
 
-        # Admin States mantiqi
-        state = admin_state.get(user_id)
-        if state == "choose_category":
+        # Admin mantiqiy qadamlari
+        astate = user_data.get('admin_state')
+        if astate == "choose_category":
             cats = {"1": "MAT_MILLIY", "2": "FIZ_MILLIY", "3": "MAT_DTM", "4": "FIZ_DTM"}
             if text in cats:
-                user_data["category"] = cats[text]
-                admin_state[user_id] = "pdf_id"
-                await update.message.reply_text("Test uchun yangi ID raqam yozing:")
+                user_data["temp_cat"] = cats[text]
+                user_data['admin_state'] = "pdf_id"
+                await update.message.reply_text("Test uchun ID raqam yozing (masalan: M01):")
             return
-        elif state == "pdf_id":
-            user_data["pdf_test_id"] = text.upper()
-            admin_state[user_id] = "pdf_file"
+        elif astate == "pdf_id":
+            user_data["temp_tid"] = text.upper()
+            user_data['admin_state'] = "pdf_file"
             await update.message.reply_text("📄 Endi PDF faylni yuboring:")
             return
-        elif state == "key_id":
-            user_data["key_test_id"] = text.upper()
-            admin_state[user_id] = "key_answers"
-            await update.message.reply_text("✍️ Kalitlarni yuboring (masalan: abcd...):")
+        elif astate == "key_id":
+            user_data["temp_key_id"] = text.upper()
+            user_data['admin_state'] = "key_val"
+            await update.message.reply_text(f"✍️ {text.upper()} uchun kalitlarni yuboring (abcd...):")
             return
-        elif state == "key_answers":
-            tid = user_data["key_test_id"]
-            ans = re.sub(r'[^a-eA-E]', '', text).lower()
-            correct_answers[tid] = ans
+        elif astate == "key_val":
+            tid = user_data["temp_key_id"]
+            db["answers"][tid] = re.sub(r'[^a-eA-E]', '', text).lower()
             save_data()
             await update.message.reply_text(f"✅ Kalit saqlandi! ID: {tid}", reply_markup=get_main_keyboard(user_id))
-            del admin_state[user_id]
+            user_data.clear()
             return
 
-    # 3. USER: KATEGORIYA TANLASH
+    # 3. TEST KATEGORIYALARI
     if "Matematika" in text or "Fizika" in text:
         if "Matematika" in text and "MILLIY" in text: sel_cat="MAT_MILLIY"
         elif "Fizika" in text and "MILLIY" in text: sel_cat="FIZ_MILLIY"
         elif "Matematika" in text and "DTM" in text: sel_cat="MAT_DTM"
         else: sel_cat="FIZ_DTM"
 
-        available = [tid for tid, cat in test_category.items() if cat == sel_cat]
+        available = [tid for tid, cat in db["categories"].items() if cat == sel_cat]
         if not available:
             await update.message.reply_text("⚠️ Hozircha bu bo'limda testlar yo'q.")
             return
@@ -159,9 +173,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📑 Testni tanlang:", reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True))
         return
 
-    # 4. USER: TEST JARAYONI
+    # 4. TEST TOPSHIRISH JARAYONI
     if user_data.get('state') == 'choosing_test':
-        if text in test_category:
+        if text in db["categories"]:
             user_data['selected_test_id'] = text
             user_data['state'] = 'waiting_test'
             await update.message.reply_text(f"💎 Tanlandi: {text}", reply_markup=start_test_menu())
@@ -169,20 +183,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "🚀 Testni boshlash" and user_data.get('state') == 'waiting_test':
         tid = user_data['selected_test_id']
-        path = pdf_files.get(tid)
+        path = db["pdfs"].get(tid)
         if path and os.path.exists(path):
-            await update.message.reply_document(document=open(path, 'rb'), caption=f"📝 Test ID: {tid}\nJavoblarni yuboring:")
+            await update.message.reply_document(document=open(path, 'rb'), caption=f"📝 Test ID: {tid}\nJavoblaringizni bir qatorda yuboring (masalan: abcd...)")
             user_data['state'] = 'solving'
         else:
-            await update.message.reply_text("❌ Xato: PDF fayl topilmadi.")
+            await update.message.reply_text("❌ PDF fayl topilmadi.")
         return
 
     if user_data.get('state') == 'solving':
         tid = user_data['selected_test_id']
-        correct_key = correct_answers.get(tid)
+        correct_key = db["answers"].get(tid)
         if not correct_key:
-            await update.message.reply_text("❗ Bu test uchun kalitlar hali yuklanmagan.")
-            user_data.clear()
+            await update.message.reply_text("❗ Kalitlar hali yuklanmagan.")
             return
             
         user_ans = re.sub(r'[^a-eA-E]', '', text).lower()
@@ -195,25 +208,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data.clear()
         return
 
-    # 5. NATIJA CHIQARISH (Xatolik tuzatildi)
+    # 5. NATIJA CHIQARISH (ID tekshirish bilan)
     if text == "📊 NATIJA CHIQARISH":
-        user_data['state'] = 'enter_test_id'
+        user_data['state'] = 'enter_check_id'
         await update.message.reply_text("Natijani bilish uchun Test ID yuboring:", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True))
         return
 
-    if user_data.get('state') == 'enter_test_id':
+    if user_data.get('state') == 'enter_check_id':
         tid = text.upper()
-        if tid not in correct_answers:
-            await update.message.reply_text(f"❌ Kechirasiz, '{tid}' ID raqamli test topilmadi. Qaytadan urinib ko'ring yoki Admin bilan bog'laning.")
+        if tid not in db["answers"]:
+            await update.message.reply_text(f"❌ '{tid}' ID raqamli test topilmadi. Qayta urinib ko'ring:")
         else:
-            user_data['check_test_id'] = tid
-            user_data['state'] = 'enter_answers'
-            await update.message.reply_text(f"✅ {tid} testi topildi. Javoblaringizni yuboring:")
+            user_data['check_tid'] = tid
+            user_data['state'] = 'enter_check_ans'
+            await update.message.reply_text(f"✅ {tid} topildi. Endi javoblaringizni yuboring:")
         return
 
-    if user_data.get('state') == 'enter_answers':
-        tid = user_data['check_test_id']
-        correct_key = correct_answers.get(tid)
+    if user_data.get('state') == 'enter_check_ans':
+        tid = user_data['check_tid']
+        correct_key = db["answers"][tid]
         user_ans = re.sub(r'[^a-eA-E]', '', text).lower()
         correct_count = sum(1 for u, c in zip(user_ans, correct_key) if u == c)
         percent = (correct_count * 100) // len(correct_key)
@@ -224,26 +237,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== PDF UPLOAD (ADMIN) =====
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id == ADMIN_ID and admin_state.get(user_id) == "pdf_file":
-        test_id = context.user_data.get("pdf_test_id")
-        category = context.user_data.get("category")
+    if user_id == ADMIN_ID and context.user_data.get('admin_state') == "pdf_file":
+        tid = context.user_data.get("temp_tid")
+        cat = context.user_data.get("temp_cat")
+        
         file = await context.bot.get_file(update.message.document.file_id)
-        fname = f"{test_id}.pdf"
+        fname = f"{tid}.pdf"
         await file.download_to_drive(fname)
-        pdf_files[test_id] = fname
-        test_category[test_id] = category
+        
+        db["pdfs"][tid] = fname
+        db["categories"][tid] = cat
         save_data()
-        await update.message.reply_text(f"✅ PDF saqlandi! ID: {test_id}", reply_markup=get_main_keyboard(user_id))
-        if user_id in admin_state: del admin_state[user_id]
+        
+        await update.message.reply_text(f"✅ PDF yuklandi! ID: {tid}", reply_markup=get_main_keyboard(user_id))
+        context.user_data.clear()
 
-# ===== RUN =====
+# ===== MAIN RUN =====
 if __name__ == "__main__":
     load_data()
-    keep_alive()
+    keep_alive() # Render uchun Flask
+    
     if TOKEN:
         app = ApplicationBuilder().token(TOKEN).build()
+        
         app.add_handler(CommandHandler("start", start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_handler(MessageHandler(filters.Document.PDF, handle_document))
+        
         print("Bot ishlamoqda... 🚀")
+        # drop_pending_updates=True konfliktlarni oldini oladi
         app.run_polling(drop_pending_updates=True)
