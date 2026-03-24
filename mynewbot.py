@@ -13,7 +13,7 @@ try:
 except ImportError:
     pymongo = None
 
-
+# ===== SERVER (Render uchun) =====
 server = Flask('')
 @server.route('/')
 def home(): return "Bot is live! 🚀"
@@ -22,6 +22,7 @@ def run():
     port = int(os.environ.get("PORT", 10000))
     server.run(host='0.0.0.0', port=port)
 
+# ===== DATABASE (MongoDB Atlas) =====
 MONGO_URL = os.getenv("MONGO_URL") 
 db = {"answers": {}, "pdfs": {}, "categories": {}, "users": [], "results": {}}
 
@@ -53,11 +54,12 @@ def load_data():
             for k in db.keys():
                 if k in loaded: db[k] = loaded[k]
 
+# ===== KEYBOARDS =====
 def get_main_keyboard(user_id):
     btns = [
         [KeyboardButton("🥇 MILLIY SERTIFIKAT (Matematika)"), KeyboardButton("🥇 MILLIY SERTIFIKAT (Fizika)")],
         [KeyboardButton("🏛️ DTM TESTLAR (Matematika)"), KeyboardButton("🏛️ DTM TESTLAR (Fizika)")],
-        [KeyboardButton("📊 NATIJA TIKSHIRISH"), KeyboardButton("📜 MENING NATIJALARIM")],
+        [KeyboardButton("📊 NATIJA TEKSHIRISH"), KeyboardButton("📜 MENING NATIJALARIM")],
         [KeyboardButton("👨‍💻 Adminga bog'lanish")]
     ]
     if user_id == ADMIN_ID:
@@ -66,14 +68,14 @@ def get_main_keyboard(user_id):
     return ReplyKeyboardMarkup(btns, resize_keyboard=True)
 
 def get_back_keyboard():
-    
+    # FAQAT SHU TUGMA QOLADI
     return ReplyKeyboardMarkup([[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True)
 
-
+# ===== CONFIG =====
 ADMIN_ID = 6257157305
 TOKEN = os.getenv("BOT_TOKEN")
 
-
+# ===== HANDLERS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     if uid not in db["users"]: db["users"].append(uid)
@@ -85,7 +87,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     user_data = context.user_data
 
-   
+    # 1. HAR DOIM ISHLAYDIGAN TUGMALAR
     if text == "👨‍💻 Adminga bog'lanish":
         await update.message.reply_text("👨‍💻 Admin bilan bog'lanish: @miracle_1204")
         return
@@ -95,6 +97,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🏠 Asosiy menyu:", reply_markup=get_main_keyboard(int(uid)))
         return
 
+    # 2. ADMIN FUNKSIYALARI
     if int(uid) == ADMIN_ID:
         if text == "➕ TEST QO'SHISH":
             user_data['admin_state'] = "cat"
@@ -130,6 +133,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data.clear()
             return
 
+    # 3. FOYDALANUVCHI FUNKSIYALARI (O'ZGARISH SHU YERDA)
     if text == "📊 NATIJA TEKSHIRISH":
         user_data['state'] = 'check_id'
         # Menyuni almashtiramiz
@@ -161,12 +165,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if uid not in db["results"]: db["results"][uid] = []
         db["results"][uid].append({"id": tid, "score": score, "total": len(correct), "percent": perc, "date": dt})
         save_data()
-     
+        # Natija chiqib bo'lgach, menyuni qaytaramiz
         await update.message.reply_text(f"📊 Natija: {score}/{len(correct)} ({perc}%)\n\n{analysis}", reply_markup=get_main_keyboard(int(uid)))
         user_data.clear()
         return
 
-    
+    # TESTLARNI KO'RSATISH
     if "MILLIY" in text or "DTM" in text:
         if "Matematika" in text and "MILLIY" in text: sc = "MAT_MILLIY"
         elif "Fizika" in text and "MILLIY" in text: sc = "FIZ_MILLIY"
