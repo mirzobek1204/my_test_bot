@@ -4,3 +4,4 @@ werkzeug==3.0.1
 gunicorn==21.2.0
 pymongo==4.6.1
 dnspython==2.6.1
+openai==1.33.0   # <-- AI funksiyasi uchun qo'shildi
