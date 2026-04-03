@@ -3,6 +3,7 @@ import os
 import re
 import json
 import threading
+import requests
 from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
@@ -65,13 +66,14 @@ def load_data():
 ADMIN_ID = 6257157305
 TOKEN = os.getenv("BOT_TOKEN")
 openai.api_key = os.getenv("OPENAI_API_KEY")
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")  # Agar Gemini ishlatilsa
 
 def get_main_keyboard(user_id):
     btns = [
         [KeyboardButton("🥇 MILLIY SERTIFIKAT (Matematika)"), KeyboardButton("🥇 MILLIY SERTIFIKAT (Fizika)")],
         [KeyboardButton("🏛️ DTM TESTLAR (Matematika)"), KeyboardButton("🏛️ DTM TESTLAR (Fizika)")],
         [KeyboardButton("📊 NATIJA TEKSHIRISH"), KeyboardButton("📜 MENING NATIJALARIM")],
-        [KeyboardButton("👨‍💻 Adminga bog'lanish")]
+        [KeyboardButton("👨‍💻 Adminga bog'lanish"), KeyboardButton("🤖 Ask AI")]  # yangi tugma
     ]
     if user_id == ADMIN_ID:
         btns.append([KeyboardButton("➕ TEST QO'SHISH"), KeyboardButton("🔑 KALIT YUKLASH")])
@@ -80,6 +82,20 @@ def get_main_keyboard(user_id):
 
 def get_back_keyboard():
     return ReplyKeyboardMarkup([[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True)
+
+# ===== Gemini API Helper =====
+def ask_gemini(question):
+    if not GEMINI_KEY:
+        return "❌ Gemini API key topilmadi."
+    url = "https://api.gemini.com/v1/completions"
+    headers = {"Authorization": f"Bearer {GEMINI_KEY}"}
+    data = {"prompt": question, "max_tokens": 300, "temperature": 0.7}
+    try:
+        resp = requests.post(url, headers=headers, json=data)
+        return resp.json().get("text", "❌ Javob topilmadi.")
+    except Exception as e:
+        logging.error(f"Gemini API error: {e}")
+        return "❌ AI bilan bog'lanishda xatolik yuz berdi."
 
 # ===== HANDLERS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97,7 +113,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user_data = context.user_data
 
-    # --- 1. ASOSIY BUYRUQLAR ---
+    # --- ASOSIY BUYRUQLAR ---
     if text in ["🔙 ASOSIY MENYU", "🛑 TESTNI YAKUNLASH"]:
         user_data.pop('state', None)
         user_data.pop('admin_state', None)
@@ -108,7 +124,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "👨‍💻 Adminga bog'lanish":
         return await update.message.reply_text("👨‍💻 Admin bilan bog'lanish: @miracle_1204")
 
-    # --- 2. FAQAT ADMIN ---
+    # --- ADMIN QISMI ---
     if uid == ADMIN_ID:
         if text == "👥 STATISTIKA":
             u_count = len(db.get("users", []))
@@ -142,7 +158,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_data.clear()
             return await update.message.reply_text("✅ Saqlandi!", reply_markup=get_main_keyboard(ADMIN_ID))
 
-    # --- 3. NATIJA TEKSHIRISH ---
+    # --- NATIJA TEKSHIRISH ---
     if text == "📊 NATIJA TEKSHIRISH":
         user_data['state'] = 'check_id'
         return await update.message.reply_text("📝 Test ID-ni yozing:", reply_markup=get_back_keyboard())
@@ -163,7 +179,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data()
         return await update.message.reply_text(f"📊 Natija: {score}/{len(correct)}", reply_markup=get_main_keyboard(uid))
 
-    # --- 4. BO'LIM TANLASH ---
+    # --- BO'LIM TANLASH ---
     all_menus = [
         "🥇 MILLIY SERTIFIKAT (Matematika)", "🥇 MILLIY SERTIFIKAT (Fizika)",
         "🏛️ DTM TESTLAR (Matematika)", "🏛️ DTM TESTLAR (Fizika)"
@@ -185,22 +201,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_document(document=f, caption=f"ID: {text}")
         return
 
-    # --- 5. AI javobi (faqat test konteksti bo‘lmasa) ---
-    if user_data.get('state') not in ['check_id', 'check_ans', 'choosing']:
-        context_text = f"Foydalanuvchi savoli: {text}\n\n"
-        context_text += "TestArena bot konteksti: Bu bot Milliy va DTM testlar bilan ishlaydi, foydalanuvchiga javoblarni aniqlash yoki test mavzusida yordam beradi."
-        try:
-            response = openai.Completion.create(
-                model="text-davinci-003",
-                prompt=context_text,
-                max_tokens=200,
-                temperature=0.7
-            )
-            ai_text = response.choices[0].text.strip()
-        except Exception as e:
-            ai_text = "❌ AI bilan bog'lanishda xatolik yuz berdi."
-            logging.error(f"OpenAI error: {e}")
+    # --- AI javobi / Ask AI ---
+    if text == "🤖 Ask AI":
+        user_data['state'] = 'ai_mode'
+        return await update.message.reply_text(
+            "🤖 AI bilan suhbatni boshlang. Savolingizni yozing:", 
+            reply_markup=get_back_keyboard()
+        )
+
+    if user_data.get('state') == 'ai_mode':
+        # Gemini API ishlatish
+        ai_text = ask_gemini(text) if GEMINI_KEY else "❌ Gemini API key yo‘q."
         await update.message.reply_text(ai_text, reply_markup=get_main_keyboard(uid))
+        user_data.pop('state', None)
+        return
 
 async def handle_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID and context.user_data.get('admin_state') == "tfile":
