@@ -6,6 +6,7 @@ import threading
 from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import openai
 
 # ===== LOGGING & SERVER =====
 logging.basicConfig(
@@ -63,6 +64,7 @@ def load_data():
 # ===== CONFIG & KEYBOARDS =====
 ADMIN_ID = 6257157305
 TOKEN = os.getenv("BOT_TOKEN")
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def get_main_keyboard(user_id):
     btns = [
@@ -81,7 +83,7 @@ def get_back_keyboard():
 
 # ===== HANDLERS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id  # int
+    uid = update.effective_user.id
     if uid not in db["users"]: 
         db["users"].append(uid)
     save_data()
@@ -108,14 +110,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- 2. FAQAT ADMIN ---
     if uid == ADMIN_ID:
-        # Statistik
         if text == "👥 STATISTIKA":
             u_count = len(db.get("users", []))
-            t_count = len(db.get("answers", {}))
+            t_count = len(db.get("pdfs", {}))  # testlar soni
             return await update.message.reply_text(
                 f"📊 **BOT STATISTIKASI**\n\n👤 Jami foydalanuvchilar: {u_count}\n📝 Yuklangan testlar: {t_count}"
             )
-        # Test qo‘shish bosqichlari
         if text == "➕ TEST QO'SHISH":
             user_data['admin_state'] = "cat"
             return await update.message.reply_text(
@@ -130,8 +130,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif user_data.get('admin_state') == "tid":
             user_data.update({"ttid": text.upper(), "admin_state": "tfile"})
             return await update.message.reply_text(f"ID: {text.upper()}. Endi PDF-ni yuboring:", reply_markup=get_back_keyboard())
-
-        # Kalit yuklash bosqichlari
         if text == "🔑 KALIT YUKLASH":
             user_data['admin_state'] = "kid"
             return await update.message.reply_text("Test ID-ni yozing:", reply_markup=get_back_keyboard())
@@ -187,11 +185,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_document(document=f, caption=f"ID: {text}")
         return
 
-    # --- 5. TUSHUNARSIZ XABAR ---
-    await update.message.reply_text(
-        "⚠️ Noma'lum buyruq. Iltimos, menyudagi tugmalardan foydalaning.",
-        reply_markup=get_main_keyboard(uid)
-    )
+    # --- 5. AI javobi (faqat test konteksti bo‘lmasa) ---
+    if user_data.get('state') not in ['check_id', 'check_ans', 'choosing']:
+        context_text = f"Foydalanuvchi savoli: {text}\n\n"
+        context_text += "TestArena bot konteksti: Bu bot Milliy va DTM testlar bilan ishlaydi, foydalanuvchiga javoblarni aniqlash yoki test mavzusida yordam beradi."
+        try:
+            response = openai.Completion.create(
+                model="text-davinci-003",
+                prompt=context_text,
+                max_tokens=200,
+                temperature=0.7
+            )
+            ai_text = response.choices[0].text.strip()
+        except Exception as e:
+            ai_text = "❌ AI bilan bog'lanishda xatolik yuz berdi."
+            logging.error(f"OpenAI error: {e}")
+        await update.message.reply_text(ai_text, reply_markup=get_main_keyboard(uid))
 
 async def handle_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID and context.user_data.get('admin_state') == "tfile":
