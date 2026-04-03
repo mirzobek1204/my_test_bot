@@ -7,7 +7,6 @@ import requests
 from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-import openai
 
 # ===== LOGGING & SERVER =====
 logging.basicConfig(
@@ -65,15 +64,14 @@ def load_data():
 # ===== CONFIG & KEYBOARDS =====
 ADMIN_ID = 6257157305
 TOKEN = os.getenv("BOT_TOKEN")
-openai.api_key = os.getenv("OPENAI_API_KEY")
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")  # Agar Gemini ishlatilsa
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
 def get_main_keyboard(user_id):
     btns = [
         [KeyboardButton("🥇 MILLIY SERTIFIKAT (Matematika)"), KeyboardButton("🥇 MILLIY SERTIFIKAT (Fizika)")],
         [KeyboardButton("🏛️ DTM TESTLAR (Matematika)"), KeyboardButton("🏛️ DTM TESTLAR (Fizika)")],
         [KeyboardButton("📊 NATIJA TEKSHIRISH"), KeyboardButton("📜 MENING NATIJALARIM")],
-        [KeyboardButton("👨‍💻 Adminga bog'lanish"), KeyboardButton("🤖 Ask AI")]  # yangi tugma
+        [KeyboardButton("👨‍💻 Adminga bog'lanish"), KeyboardButton("🤖 Ask AI")]
     ]
     if user_id == ADMIN_ID:
         btns.append([KeyboardButton("➕ TEST QO'SHISH"), KeyboardButton("🔑 KALIT YUKLASH")])
@@ -83,19 +81,29 @@ def get_main_keyboard(user_id):
 def get_back_keyboard():
     return ReplyKeyboardMarkup([[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True)
 
-# ===== Gemini API Helper =====
+# ===== Gemini API Helper (To'g'rilangan) =====
 def ask_gemini(question):
     if not GEMINI_KEY:
-        return "❌ Gemini API key topilmadi."
-    url = "https://api.gemini.com/v1/completions"
-    headers = {"Authorization": f"Bearer {GEMINI_KEY}"}
-    data = {"prompt": question, "max_tokens": 300, "temperature": 0.7}
+        return "❌ Gemini API key topilmadi. Iltimos, muhit o'zgaruvchilarini tekshiring."
+    
+    # Google AI Studio Gemini API URL
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+    
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{
+            "parts": [{"text": question}]
+        }]
+    }
+    
     try:
-        resp = requests.post(url, headers=headers, json=data)
-        return resp.json().get("text", "❌ Javob topilmadi.")
+        resp = requests.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        res_json = resp.json()
+        return res_json['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
-        logging.error(f"Gemini API error: {e}")
-        return "❌ AI bilan bog'lanishda xatolik yuz berdi."
+        logging.error(f"Gemini API xatosi: {e}")
+        return "❌ AI bilan bog'lanishda xatolik yuz berdi. Keyinchalik urinib ko'ring."
 
 # ===== HANDLERS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -114,9 +122,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = context.user_data
 
     # --- ASOSIY BUYRUQLAR ---
-    if text in ["🔙 ASOSIY MENYU", "🛑 TESTNI YAKUNLASH"]:
-        user_data.pop('state', None)
-        user_data.pop('admin_state', None)
+    if text == "🔙 ASOSIY MENYU":
+        user_data.clear()
         return await update.message.reply_text(
             "🏠 Asosiy menyu:", reply_markup=get_main_keyboard(uid)
         )
@@ -124,39 +131,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "👨‍💻 Adminga bog'lanish":
         return await update.message.reply_text("👨‍💻 Admin bilan bog'lanish: @miracle_1204")
 
+    # --- AI REJIMI ---
+    if text == "🤖 Ask AI":
+        user_data['state'] = 'ai_mode'
+        return await update.message.reply_text(
+            "🤖 AI rejimi yoqildi. Savolingizni yozing (Chiqish uchun '🔙 ASOSIY MENYU' ni bosing):", 
+            reply_markup=get_back_keyboard()
+        )
+
+    if user_data.get('state') == 'ai_mode':
+        await context.bot.send_chat_action(chat_id=uid, action="typing")
+        ai_response = ask_gemini(text)
+        return await update.message.reply_text(ai_response)
+
     # --- ADMIN QISMI ---
     if uid == ADMIN_ID:
         if text == "👥 STATISTIKA":
             u_count = len(db.get("users", []))
-            t_count = len(db.get("pdfs", {}))  # testlar soni
+            t_count = len(db.get("pdfs", {}))
             return await update.message.reply_text(
                 f"📊 **BOT STATISTIKASI**\n\n👤 Jami foydalanuvchilar: {u_count}\n📝 Yuklangan testlar: {t_count}"
             )
+        
         if text == "➕ TEST QO'SHISH":
             user_data['admin_state'] = "cat"
             return await update.message.reply_text(
                 "Bo'limni tanlang:\n1. Mat Milliy\n2. Fiz Milliy\n3. Mat DTM\n4. Fiz DTM", 
                 reply_markup=get_back_keyboard()
             )
+        
         if user_data.get('admin_state') == "cat":
             cs = {"1":"MAT_MILLIY","2":"FIZ_MILLIY","3":"MAT_DTM","4":"FIZ_DTM"}
             if text in cs:
                 user_data.update({"tcat": cs[text], "admin_state": "tid"})
-                return await update.message.reply_text("Test ID-ni yozing (Masalan: M-01):", reply_markup=get_back_keyboard())
+                return await update.message.reply_text("Test ID-ni yozing (Masalan: M-01):")
+        
         elif user_data.get('admin_state') == "tid":
             user_data.update({"ttid": text.upper(), "admin_state": "tfile"})
-            return await update.message.reply_text(f"ID: {text.upper()}. Endi PDF-ni yuboring:", reply_markup=get_back_keyboard())
+            return await update.message.reply_text(f"ID: {text.upper()}. Endi PDF-ni yuboring:")
+
         if text == "🔑 KALIT YUKLASH":
             user_data['admin_state'] = "kid"
             return await update.message.reply_text("Test ID-ni yozing:", reply_markup=get_back_keyboard())
+        
         elif user_data.get('admin_state') == "kid":
             user_data.update({"tkid": text.upper(), "admin_state": "kval"})
-            return await update.message.reply_text(f"'{text.upper()}' uchun kalitlarni yuboring:", reply_markup=get_back_keyboard())
+            return await update.message.reply_text(f"'{text.upper()}' uchun kalitlarni yuboring:")
+        
         elif user_data.get('admin_state') == "kval":
             db["answers"][user_data["tkid"]] = re.sub(r'[^a-eA-E]', '', text).lower()
             save_data()
             user_data.clear()
-            return await update.message.reply_text("✅ Saqlandi!", reply_markup=get_main_keyboard(ADMIN_ID))
+            return await update.message.reply_text("✅ Kalitlar saqlandi!", reply_markup=get_main_keyboard(ADMIN_ID))
 
     # --- NATIJA TEKSHIRISH ---
     if text == "📊 NATIJA TEKSHIRISH":
@@ -166,9 +192,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_data.get('state') == 'check_id':
         tid = text.upper()
         if tid not in db["answers"]:
-            return await update.message.reply_text("❌ ID topilmadi. Qayta urinib ko'ring.", reply_markup=get_back_keyboard())
+            return await update.message.reply_text("❌ Bunday ID mavjud emas. Qayta urinib ko'ring.")
         user_data.update({"ctid": tid, "state": "check_ans"})
-        return await update.message.reply_text(f"✅ {tid} topildi. Javoblarni yuboring:", reply_markup=get_back_keyboard())
+        return await update.message.reply_text(f"✅ {tid} topildi. Endi javoblaringizni yuboring (masalan: abcd...):")
 
     if user_data.get('state') == 'check_ans':
         tid = user_data['ctid']
@@ -176,44 +202,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         u_ans = re.sub(r'[^a-eA-E]', '', text).lower()
         score = sum(1 for i, char in enumerate(correct) if i < len(u_ans) and u_ans[i] == char)
         user_data.clear()
-        save_data()
         return await update.message.reply_text(f"📊 Natija: {score}/{len(correct)}", reply_markup=get_main_keyboard(uid))
 
-    # --- BO'LIM TANLASH ---
-    all_menus = [
-        "🥇 MILLIY SERTIFIKAT (Matematika)", "🥇 MILLIY SERTIFIKAT (Fizika)",
-        "🏛️ DTM TESTLAR (Matematika)", "🏛️ DTM TESTLAR (Fizika)"
-    ]
+    # --- BO'LIMLARNI KO'RISH ---
+    all_menus = {
+        "🥇 MILLIY SERTIFIKAT (Matematika)": "MAT_MILLIY",
+        "🥇 MILLIY SERTIFIKAT (Fizika)": "FIZ_MILLIY",
+        "🏛️ DTM TESTLAR (Matematika)": "MAT_DTM",
+        "🏛️ DTM TESTLAR (Fizika)": "FIZ_DTM"
+    }
+    
     if text in all_menus:
-        sc = "MAT_MILLIY" if "Matematika" in text and "MILLIY" in text else \
-             "FIZ_MILLIY" if "Fizika" in text and "MILLIY" in text else \
-             "MAT_DTM" if "Matematika" in text and "DTM" in text else "FIZ_DTM"
+        sc = all_menus[text]
         av = [t for t, c in db["categories"].items() if c == sc]
-        if not av: return await update.message.reply_text("⚠️ Hozircha testlar yo'q.")
+        if not av: return await update.message.reply_text("⚠️ Hozircha bu bo'limda testlar yo'q.")
         btns = [[KeyboardButton(t)] for t in av] + [[KeyboardButton("🔙 ASOSIY MENYU")]]
         user_data['state'] = 'choosing'
-        return await update.message.reply_text("📑 Tanlang:", reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True))
+        return await update.message.reply_text("📑 Testni tanlang:", reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True))
 
     if user_data.get('state') == 'choosing' and text in db["categories"]:
         path = db["pdfs"].get(text)
         if path and os.path.exists(path):
             with open(path, 'rb') as f:
-                await update.message.reply_document(document=f, caption=f"ID: {text}")
-        return
-
-    # --- AI javobi / Ask AI ---
-    if text == "🤖 Ask AI":
-        user_data['state'] = 'ai_mode'
-        return await update.message.reply_text(
-            "🤖 AI bilan suhbatni boshlang. Savolingizni yozing:", 
-            reply_markup=get_back_keyboard()
-        )
-
-    if user_data.get('state') == 'ai_mode':
-        # Gemini API ishlatish
-        ai_text = ask_gemini(text) if GEMINI_KEY else "❌ Gemini API key yo‘q."
-        await update.message.reply_text(ai_text, reply_markup=get_main_keyboard(uid))
-        user_data.pop('state', None)
+                await update.message.reply_document(document=f, caption=f"Test ID: {text}")
+        else:
+            await update.message.reply_text("❌ PDF fayl topilmadi.")
         return
 
 async def handle_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -224,10 +237,10 @@ async def handle_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await file.download_to_drive(path)
         db["pdfs"][tid], db["categories"][tid] = path, cat
         save_data()
-        await update.message.reply_text("✅ Test PDF yuklandi!", reply_markup=get_main_keyboard(ADMIN_ID))
+        await update.message.reply_text("✅ Test PDF muvaffaqiyatli yuklandi!", reply_markup=get_main_keyboard(ADMIN_ID))
         context.user_data.clear()
 
-# ===== BOT ISHLASHI =====
+# ===== BOTNI ISHGA TUSHIRISH =====
 if __name__ == "__main__":
     load_data()
     threading.Thread(target=run, daemon=True).start()
@@ -236,4 +249,5 @@ if __name__ == "__main__":
         app.add_handler(CommandHandler("start", start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_handler(MessageHandler(filters.Document.PDF, handle_doc))
-        app.run_polling(drop_pending_updates=True, poll_interval=0.5)
+        print("Bot ishga tushdi...")
+        app.run_polling(drop_pending_updates=True)
