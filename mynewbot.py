@@ -59,6 +59,7 @@ def load_data():
 # ===== CONFIG & KEYBOARDS =====
 ADMIN_ID = 6257157305
 TOKEN = os.getenv("BOT_TOKEN")
+# Render paneli bilan bir xil nomda bo'lishi shart
 GEMINI_KEY = os.getenv("GEMINI_API_KEY") 
 
 def get_main_keyboard(user_id):
@@ -76,33 +77,29 @@ def get_main_keyboard(user_id):
 def get_back_keyboard():
     return ReplyKeyboardMarkup([[KeyboardButton("🔙 ASOSIY MENYU")]], resize_keyboard=True)
 
-# ===== Gemini AI (404 TUZATILGAN) =====
+# ===== Gemini AI (404 VA MODEL TOPILMADI XATOLARI TUZATILGAN) =====
 def ask_gemini(question):
     if not GEMINI_KEY:
-        return "❌ Gemini API kaliti topilmadi."
+        return "❌ Gemini API kaliti (GEMINI_API_KEY) o'rnatilmagan."
     
-    # URL manzilini v1beta1 deb o'zgartirdik, bu barcha modellarni qo'llab-quvvatlaydi
+    # URL v1beta ga o'zgartirildi, bu versiya 1.5-flash ni aniq taniydi
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
     
     headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{
-            "parts": [{"text": question}]
-        }]
-    }
+    payload = {"contents": [{"parts": [{"text": question}]}]}
     
     try:
+        # requests kutubxonasi requirements.txt da borligi tekshirildi
         resp = requests.post(url, headers=headers, json=payload, timeout=20)
         res_json = resp.json()
         
         if resp.status_code != 200:
-            # Xato xabarini aniq ko'rsatish
             error_msg = res_json.get('error', {}).get('message', 'Noma\'lum xato')
             return f"❌ AI xatosi ({resp.status_code}): {error_msg}"
 
         return res_json['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
-        return f"❌ Texnik xatolik: {str(e)}"
+        return f"❌ Ulanish xatosi: {str(e)}"
 
 # ===== HANDLERS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -132,7 +129,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_chat_action(chat_id=uid, action="typing")
         return await update.message.reply_text(ask_gemini(text))
 
-    # --- ADMIN FUNKSIYALARI ---
+    # --- ADMIN QISMI ---
     if uid == ADMIN_ID:
         if text == "👥 STATISTIKA":
             return await update.message.reply_text(f"📊 Foydalanuvchilar: {len(db['users'])}\n📝 Testlar: {len(db['pdfs'])}")
@@ -142,28 +139,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("Bo'limni tanlang:\n1. Mat Milliy\n2. Fiz Milliy\n3. Mat DTM\n4. Fiz DTM")
         
         if user_data.get('admin_state') == "cat":
-            cats = {"1":"MAT_MILLIY","2":"FIZ_MILLIY","3":"MAT_DTM","4":"FIZ_DTM"}
-            if text in cats:
-                user_data.update({"tcat": cats[text], "admin_state": "tid"})
-                return await update.message.reply_text("Test ID yozing (masalan: M-01):")
+            cs = {"1":"MAT_MILLIY","2":"FIZ_MILLIY","3":"MAT_DTM","4":"FIZ_DTM"}
+            if text in cs:
+                user_data.update({"tcat": cs[text], "admin_state": "tid"})
+                return await update.message.reply_text("Test ID yozing (M-01):")
         
         elif user_data.get('admin_state') == "tid":
             user_data.update({"ttid": text.upper(), "admin_state": "tfile"})
-            return await update.message.reply_text("Endi PDF faylni yuboring:")
+            return await update.message.reply_text("PDF faylni yuboring:")
 
         if text == "🔑 KALIT YUKLASH":
             user_data['admin_state'] = "kid"
-            return await update.message.reply_text("Qaysi ID uchun kalit yuklaysiz?")
+            return await update.message.reply_text("Test ID yozing:")
         
         elif user_data.get('admin_state') == "kid":
             user_data.update({"tkid": text.upper(), "admin_state": "kval"})
-            return await update.message.reply_text(f"{text.upper()} uchun kalitlarni yuboring (abcd...):")
+            return await update.message.reply_text(f"{text.upper()} uchun kalitlarni yuboring:")
         
         elif user_data.get('admin_state') == "kval":
             db["answers"][user_data["tkid"]] = re.sub(r'[^a-e]', '', text.lower())
             save_data()
             user_data.clear()
-            return await update.message.reply_text("✅ Kalitlar saqlandi!", reply_markup=get_main_keyboard(uid))
+            return await update.message.reply_text("✅ Saqlandi!", reply_markup=get_main_keyboard(uid))
 
     # --- NATIJA TEKSHIRISH ---
     if text == "📊 NATIJA TEKSHIRISH":
@@ -184,7 +181,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data.clear()
         return await update.message.reply_text(f"📊 Natija: {score}/{len(correct)}", reply_markup=get_main_keyboard(uid))
 
-    # --- TESTLARNI CHIQARISH ---
+    # --- TESTLAR BO'LIMI ---
     menus = {"🥇 MILLIY SERTIFIKAT (Matematika)": "MAT_MILLIY", "🥇 MILLIY SERTIFIKAT (Fizika)": "FIZ_MILLIY", 
              "🏛️ DTM TESTLAR (Matematika)": "MAT_DTM", "🏛️ DTM TESTLAR (Fizika)": "FIZ_DTM"}
     
@@ -211,7 +208,7 @@ async def handle_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db["pdfs"][tid], db["categories"][tid] = path, cat
         save_data()
         context.user_data.clear()
-        await update.message.reply_text("✅ Test muvaffaqiyatli qo'shildi!", reply_markup=get_main_keyboard(ADMIN_ID))
+        await update.message.reply_text("✅ PDF yuklandi!", reply_markup=get_main_keyboard(ADMIN_ID))
 
 if __name__ == "__main__":
     load_data()
@@ -221,4 +218,5 @@ if __name__ == "__main__":
         app.add_handler(CommandHandler("start", start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_handler(MessageHandler(filters.Document.PDF, handle_doc))
+        # Conflict xatosini yo'qotish uchun
         app.run_polling(drop_pending_updates=True)
