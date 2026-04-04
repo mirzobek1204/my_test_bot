@@ -82,14 +82,17 @@ def ask_gemini(question):
     if not GEMINI_KEY:
         return "❌ Gemini API kaliti (GEMINI_API_KEY) o'rnatilmagan."
     
-    # URL v1beta ga o'zgartirildi, bu versiya 1.5-flash ni aniq taniydi
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_KEY}"
+    # DIQQAT: URL aynan shu ko'rinishda bo'lishi shart (v1beta + gemini-1.5-flash)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
     
     headers = {"Content-Type": "application/json"}
-    payload = {"contents": [{"parts": [{"text": question}]}]}
+    payload = {
+        "contents": [{
+            "parts": [{"text": question}]
+        }]
+    }
     
     try:
-        # requests kutubxonasi requirements.txt da borligi tekshirildi
         resp = requests.post(url, headers=headers, json=payload, timeout=20)
         res_json = resp.json()
         
