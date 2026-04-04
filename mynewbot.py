@@ -79,18 +79,30 @@ def get_back_keyboard():
 # ===== Gemini AI (404 TUZATILGAN) =====
 def ask_gemini(question):
     if not GEMINI_KEY:
-        return "❌ Gemini API kaliti (GEMINI_API_KEY) topilmadi."
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+        return "❌ Gemini API kaliti topilmadi."
+    
+    # URL manzilini v1beta1 deb o'zgartirdik, bu barcha modellarni qo'llab-quvvatlaydi
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+    
     headers = {"Content-Type": "application/json"}
-    payload = {"contents": [{"parts": [{"text": question}]}]}
+    payload = {
+        "contents": [{
+            "parts": [{"text": question}]
+        }]
+    }
+    
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=20)
         res_json = resp.json()
+        
         if resp.status_code != 200:
-            return f"❌ AI xatosi ({resp.status_code}): {res_json.get('error', {}).get('message', 'Xato')}"
+            # Xato xabarini aniq ko'rsatish
+            error_msg = res_json.get('error', {}).get('message', 'Noma\'lum xato')
+            return f"❌ AI xatosi ({resp.status_code}): {error_msg}"
+
         return res_json['candidates'][0]['content']['parts'][0]['text']
     except Exception as e:
-        return f"❌ Ulanish xatosi: {str(e)}"
+        return f"❌ Texnik xatolik: {str(e)}"
 
 # ===== HANDLERS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
